@@ -1,5 +1,5 @@
 # Photometry
- * needs cfitsio to be built.
+ * needs cfitsio, OpenCL to be built.
  * Performs bias, dark, flat calibration automatically
 
 ## How to configure

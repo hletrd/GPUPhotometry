@@ -1,6 +1,7 @@
-# Photometry
+# GPUPhotometry
  * needs cfitsio, OpenCL to be built.
  * Performs bias, dark, flat calibration automatically
+  * Uses OpenCL to achieve high performance.
 
 ## How to configure
  * 1st to 4th line of config.txt is number of each frames.

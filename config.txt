@@ -1,7 +1,12 @@
-0
+5
 5
 7
-5
+1
+m52-001Z.fit
+m52-002Z.fit
+m52-003Z.fit
+m52-004Z.fit
+m52-005Z.fit
 m52-001D60.fit
 m52-002D60.fit
 m52-003D60.fit
@@ -14,8 +19,4 @@ m52-005D60.fit
 20151017flatv05.fit
 20151017flatv06.fit
 20151017flatv07.fit
-m52-001Z.fit
-m52-002Z.fit
-m52-003Z.fit
-m52-004Z.fit
-m52-005Z.fit
+m52-030V.fit

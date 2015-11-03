@@ -667,19 +667,24 @@ int main(int argc, char *argv[]) {
 	free(dark_comb);
 	free(flat_comb);
 
+	fitsfile *tmp;
+
+	int bitpix;
+	int naxis;
+	long naxes[10];
+	int nkeys;
+	char buf[100];
+	int hdupos;
+
+	fits_create_img(tmp, bitpix, naxis, naxes, &status);
+	fits_get_hdu_num(photo[i], &hdupos);
+
 	for(int i = 0; i < cnt_photo; i++) {
-		fitsfile *tmp;
 		char *newname = malloc(strlen(nphoto[i])+10);
 		strcpy(newname, "processed-");
 		strcat(newname, nphoto[i]);
 		unlink(newname);
 		fits_create_file(&tmp, newname, &status);
-		int bitpix;
-		int naxis;
-		long naxes[10];
-		int nkeys;
-		char buf[100];
-		int hdupos;
 
 		fits_get_img_param(photo[i], 9, &bitpix, &naxis, naxes, &status);
 		fits_create_img(tmp, bitpix, naxis, naxes, &status);
@@ -703,6 +708,7 @@ int main(int argc, char *argv[]) {
 		fits_write_img(tmp, TFLOAT, 1, (long long)imgsize_mem, photo_comb+imgsize_mem*i, &status);
 		fits_close_file(tmp, &status);
 		printf("Saved the output as %s\n", newname);
+		free(newname);
 	}
 
 	for(int i = 0; i < cnt_bias; i++) {

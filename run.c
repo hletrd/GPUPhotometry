@@ -1,14 +1,11 @@
-#include "math.h"
 #ifdef __APPLE__
 	#include "/usr/local/Cellar/cfitsio/3.370/include/fitsio.h"
 #else
 	#include "fitsio.h"
 #endif
-//#include "gtk/gtk.h"
 #include <OpenCL/opencl.h>
 #include <stdio.h>
 #include <unistd.h>
-//#include <time.h>
 #include <string.h>
 
 #define filecnt_max 100
@@ -108,7 +105,6 @@ int main(int argc, char *argv[]) {
 	int realx = 0, realy = 0;
 	int cnt_bias, cnt_dark, cnt_flat, cnt_photo;
 	float exptime_dark[filecnt_max], exptime_flat[filecnt_max], exptime_photo[filecnt_max];
-	//clock_t begin = clock();
 
 	int err;
 	size_t global, local;
@@ -676,6 +672,7 @@ int main(int argc, char *argv[]) {
 		char *newname = malloc(strlen(nphoto[i])+10);
 		strcpy(newname, "processed-");
 		strcat(newname, nphoto[i]);
+		unlink(newname);
 		fits_create_file(&tmp, newname, &status);
 		int bitpix;
 		int naxis;
@@ -723,5 +720,5 @@ int main(int argc, char *argv[]) {
 
 	free(photo_comb);
 
-	printf("Processing completed");
+	puts("Processing completed");
 }

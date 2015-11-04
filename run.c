@@ -257,10 +257,9 @@ int main(int argc, char *argv[]) {
 
 
 
-	double *pixels = (double*)malloc(cnt_bias*realx*realy*sizeof(double));
 	float *pixels_single = (float*)malloc(cnt_bias*realx*realy*sizeof(float));
-	if (pixels == NULL) {
-		printf("Error: failed to allocate %ldbytes of memory.", cnt_bias*realx*realy*sizeof(double));
+	if (pixels_single == NULL) {
+		printf("Error: failed to allocate %ldbytes of memory.", cnt_bias*realx*realy*sizeof(float));
 		return 1;
 	}
 	long pixeli[2];
@@ -272,15 +271,12 @@ int main(int argc, char *argv[]) {
 	puts("Loading bias files...");
 	for(int j=0; j<cnt_bias; j++){
 		for(pixeli[1]=realy; pixeli[1]>0; pixeli[1]--){
-			fits_read_pix(bias[j], TDOUBLE, pixeli, realx, NULL, pixels+realx*pixeli[1]-realx+mempos, NULL, &status);
+			fits_read_pix(bias[j], TFLOAT, pixeli, realx, NULL, pixels_single+realx*pixeli[1]-realx+mempos, NULL, &status);
 		}
 		mempos += imgsize_mem;
 	}
 
 	if (cnt_bias > 0) {
-		for(int i=0; i<realx*realy*cnt_bias; i++) {
-			pixels_single[i] = (float)pixels[i];
-		}
 		puts("Combining bias...");
 		count = realy;
 		program = clCreateProgramWithSource(context, 1, (const char **)&OpenCL_average, NULL, &err);
@@ -351,12 +347,10 @@ int main(int argc, char *argv[]) {
 	}
 
 
-	free(pixels);
 	free(pixels_single);
-	pixels = (double*)malloc(cnt_dark*realx*realy*sizeof(double));
 	pixels_single = (float*)malloc(cnt_dark*realx*realy*sizeof(float));
-	if (pixels == NULL) {
-		printf("Error: failed to allocate %ldbytes of memory.", cnt_dark*realx*realy*sizeof(double));
+	if (pixels_single == NULL) {
+		printf("Error: failed to allocate %ldbytes of memory.", cnt_dark*realx*realy*sizeof(float));
 		return 1;
 	}
 	pixeli[0] = 1;
@@ -365,12 +359,9 @@ int main(int argc, char *argv[]) {
 	puts("Loading dark files...");
 	for(int j=0; j<cnt_dark; j++){
 		for(pixeli[1]=realy; pixeli[1]>0; pixeli[1]--){
-			fits_read_pix(dark[j], TDOUBLE, pixeli, realx, NULL, pixels+realx*pixeli[1]-realx+mempos, NULL, &status);
+			fits_read_pix(dark[j], TFLOAT, pixeli, realx, NULL, pixels_single+realx*pixeli[1]-realx+mempos, NULL, &status);
 		}
 		mempos += imgsize_mem;
-	}
-	for(int i=0; i<realx*realy*cnt_dark; i++) {
-		pixels_single[i] = (float)pixels[i];
 	}
 	puts("Combining dark & Subtracting bias...");
 	count = realy;
@@ -445,13 +436,10 @@ int main(int argc, char *argv[]) {
 	clReleaseKernel(kernel);
 
 
-
-	free(pixels);
 	free(pixels_single);
-	pixels = (double*)malloc(cnt_flat*realx*realy*sizeof(double));
 	pixels_single = (float*)malloc(cnt_flat*realx*realy*sizeof(float));
-	if (pixels == NULL) {
-		printf("Error: failed to allocate %ldbytes of memory.", cnt_flat*realx*realy*sizeof(double));
+	if (pixels_single == NULL) {
+		printf("Error: failed to allocate %ldbytes of memory.", cnt_flat*realx*realy*sizeof(float));
 		return 1;
 	}
 	pixeli[0] = 1;
@@ -460,12 +448,9 @@ int main(int argc, char *argv[]) {
 	puts("Loading flat files...");
 	for(int j=0; j<cnt_flat; j++) {
 		for(pixeli[1]=realy; pixeli[1]>0; pixeli[1]--){
-			fits_read_pix(flat[j], TDOUBLE, pixeli, realx, NULL, pixels+realx*pixeli[1]-realx+mempos, NULL, &status);
+			fits_read_pix(flat[j], TFLOAT, pixeli, realx, NULL, pixels_single+realx*pixeli[1]-realx+mempos, NULL, &status);
 		}
 		mempos += imgsize_mem;
-	}
-	for(int i=0; i<realx*realy*cnt_flat; i++) {
-		pixels_single[i] = (float)pixels[i];
 	}
 	count = realy;
 	puts("Combining flat & Subtracting bias, dark...");
@@ -547,7 +532,6 @@ int main(int argc, char *argv[]) {
 		flatsum += (double)flat_comb[i];
 	}
 	float flat_avg = flatsum / imgsize_mem_int;
-	free(pixels);
 	free(pixels_single);
 	clReleaseMemObject(input);
 	clReleaseMemObject(output);
@@ -557,10 +541,10 @@ int main(int argc, char *argv[]) {
 	clReleaseProgram(program);
 	clReleaseKernel(kernel);
 
-	pixels = (double*)malloc(cnt_photo*realx*realy*sizeof(double));
+
 	pixels_single = (float*)malloc(cnt_photo*realx*realy*sizeof(float));
-	if (pixels == NULL) {
-		printf("Error: failed to allocate %ldbytes of memory.", cnt_photo*realx*realy*sizeof(double));
+	if (pixels_single == NULL) {
+		printf("Error: failed to allocate %ldbytes of memory.", cnt_photo*realx*realy*sizeof(float));
 		return 1;
 	}
 	pixeli[0] = 1;
@@ -569,15 +553,11 @@ int main(int argc, char *argv[]) {
 	puts("Loading photo files...");
 	for(int j=0; j<cnt_photo; j++) {
 		for(pixeli[1]=realy; pixeli[1]>0; pixeli[1]--){
-			fits_read_pix(photo[j], TDOUBLE, pixeli, realx, NULL, pixels+realx*pixeli[1]-realx+mempos, NULL, &status);
+			fits_read_pix(photo[j], TFLOAT, pixeli, realx, NULL, pixels_single+realx*pixeli[1]-realx+mempos, NULL, &status);
 		}
 		mempos += imgsize_mem;
 	}
 	puts("Combining photo...");
-
-	for(int i=0; i<realx*realy*cnt_photo; i++) {
-		pixels_single[i] = (float)pixels[i];
-	}
 	count = realy;
 	program = clCreateProgramWithSource(context, 1, (const char **)&OpenCL_photo, NULL, &err);
 	if (!program) {
@@ -656,7 +636,6 @@ int main(int argc, char *argv[]) {
 		exit(1);
 	}
 
-	free(pixels);
 	free(pixels_single);
 	clReleaseMemObject(input);
 	clReleaseMemObject(output);
@@ -675,13 +654,88 @@ int main(int argc, char *argv[]) {
 	int naxis;
 	long naxes[10];
 	int nkeys;
-	char buf[100];
+	char buf[1000];
 	int hdupos;
 
+	/*if (cnt_bias >= 1) {
+		unlink("bias_combined.fit");
+		fits_create_file(&tmp, "bias_combined.fit", &status);
+		fits_get_img_param(bias[0], 9, &bitpix, &naxis, naxes, &status);
+		fits_create_img(tmp, bitpix, naxis, naxes, &status);
+		fits_get_hdu_num(bias[0], &hdupos);
 
-	free(bias_comb);
-	free(dark_comb);
-	free(flat_comb);
+		status=0;
+		for(; !status; hdupos++) {
+			fits_get_hdrspace(bias[0], &nkeys, NULL, &status);
+			for(int j=1; j<=nkeys; j++) {
+				fits_read_record(bias[0], j, buf, &status);
+				fits_write_record(tmp, buf, &status);
+			}
+			fits_movrel_hdu(bias[0], 1, NULL, &status);
+		}
+		if (status == END_OF_FILE) status = 0;
+
+		if (status != 0) {    
+			fits_report_error(stderr, status);
+			return(status);
+		}
+		fits_write_img(tmp, TFLOAT, 1, (long long)imgsize_mem, bias_comb, &status);
+		fits_close_file(tmp, &status);
+		printf("Saved the combined bias as bias_combined.fit\n");
+	}
+
+	if (cnt_dark >= 1) {
+		unlink("dark_combined.fit");
+		fits_create_file(&tmp, "dark_combined.fit", &status);
+		fits_get_img_param(dark[0], 9, &bitpix, &naxis, naxes, &status);
+		fits_create_img(tmp, bitpix, naxis, naxes, &status);
+		fits_get_hdu_num(dark[0], &hdupos);
+
+		status=0;
+		for(; !status; hdupos++) {
+			fits_get_hdrspace(dark[0], &nkeys, NULL, &status);
+			for(int j=1; j<=nkeys; j++) {
+				fits_read_record(dark[0], j, buf, &status);
+				fits_write_record(tmp, buf, &status);
+			}
+			fits_movrel_hdu(dark[0], 1, NULL, &status);
+		}
+		if (status == END_OF_FILE) status = 0;
+
+		if (status != 0) {    
+			fits_report_error(stderr, status);
+			return(status);
+		}
+		fits_write_img(tmp, TFLOAT, 1, (long long)imgsize_mem, dark_comb, &status);
+		fits_close_file(tmp, &status);
+		printf("Saved the combined dark as dark_combined.fit\n");
+	}*/
+
+	/*if (cnt_flat >= 1) {
+		unlink("flat_combined.fit");
+		fits_create_file(&tmp, "flat_combined.fit", &status);
+		fits_get_img_param(flat[0], 9, &bitpix, &naxis, naxes, &status);
+		fits_create_img(tmp, bitpix, naxis, naxes, &status);
+		fits_get_hdu_num(flat[0], &hdupos);
+
+		status=0;
+		for(; !status; hdupos++) {
+			fits_get_hdrspace(flat[0], &nkeys, NULL, &status);
+			for(int j=1; j<=nkeys; j++) {
+				fits_read_record(flat[0], j, buf, &status);
+				fits_write_record(tmp, buf, &status);
+			}
+			fits_movrel_hdu(flat[0], 1, NULL, &status);
+		}
+		if (status == END_OF_FILE) status = 0;
+		if (status != 0) {    
+			fits_report_error(stderr, status);
+			return(status);
+		}
+		fits_write_img(tmp, TFLOAT, 1, (long long)imgsize_mem, flat_comb, &status);
+		fits_close_file(tmp, &status);
+		printf("Saved the combined flat as flat_combined.fit\n");
+	}*/
 
 	for(int i = 0; i < cnt_photo; i++) {
 		char *newname = malloc(strlen(nphoto[i])+10);
@@ -728,6 +782,9 @@ int main(int argc, char *argv[]) {
 		fits_close_file(photo[i], &status);
 	}
 
+	free(bias_comb);
+	free(dark_comb);
+	free(flat_comb);
 	free(photo_comb);
 
 	puts("Processing completed");

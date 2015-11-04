@@ -7,6 +7,10 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
+#ifdef _WIN32
+#else
+	#include <sys/time.h>
+#endif
 
 #define filecnt_max 100
 
@@ -101,6 +105,11 @@ __kernel void photo(__global float* input, __global float* output, __global floa
 }";
 
 int main(int argc, char *argv[]) {
+	#ifdef _WIN32
+	#else
+	struct timeval t0;
+	gettimeofday(&t0, 0);
+	#endif
 	FILE *config;
 	long imgsize[100];
 	int realx = 0, realy = 0;
@@ -121,10 +130,37 @@ int main(int argc, char *argv[]) {
 	puts("");
 	puts("Initializing...");
 
-	err = clGetDeviceIDs(NULL, CL_DEVICE_TYPE_GPU, 1, &device_id, NULL);
+	puts("Reading config...");
+	if (argc != 2 || access(argv[1], F_OK) != -1) {
+		printf("Running by config: %s\n", argv[1]);
+		config = fopen(argv[1], "r");
+	} else {
+		printf("config file not found.\n\nUsage: pm <config_filename>\n");
+		return 0;
+	}
+
+	char device[100];
+	fgets(device, 100, config);
+
+	if (device[0] == 'G' || device[0] == 'g') {
+		err = clGetDeviceIDs(NULL, CL_DEVICE_TYPE_GPU, 1, &device_id, NULL);
+		puts("Using GPU...");
+	} else {
+		err = clGetDeviceIDs(NULL, CL_DEVICE_TYPE_CPU, 1, &device_id, NULL);
+		puts("Using CPU...");
+	}
 	if (err != CL_SUCCESS) {
 		puts("Error: Failed to initialize OpenCL device group.");
 		return EXIT_FAILURE;
+	}
+
+	char name[100];
+	err = clGetDeviceInfo(device_id, CL_DEVICE_NAME, 100, name, NULL);
+	if (err != CL_SUCCESS) {
+		puts("Error: Failed to get OpenCL device info.");
+		return EXIT_FAILURE;
+	} else {
+		printf("OpenCL device detected: %s\n", name);
 	}
 
 	context = clCreateContext(0, 1, &device_id, NULL, NULL, &err);
@@ -137,16 +173,6 @@ int main(int argc, char *argv[]) {
 	if (!commands) {
 		puts("Error: Failed to create a OpenCL commands.");
 		return EXIT_FAILURE;
-	}
-
-
-	puts("Reading config...");
-	if (argc != 2 || access(argv[1], F_OK) != -1) {
-		printf("Running by config: %s\n", argv[1]);
-		config = fopen(argv[1], "r");
-	} else {
-		printf("config file not found.\n\nUsage: pm <config_filename>\n");
-		return 0;
 	}
 
 	fscanf(config, "%d", &cnt_bias);
@@ -169,7 +195,6 @@ int main(int argc, char *argv[]) {
 	for (int i=0; i<cnt_photo; i++) {
 		fscanf(config, "%s", nphoto[i]);
 	}
-
 
 	int status;
 	puts("Reading files...");
@@ -744,7 +769,7 @@ int main(int argc, char *argv[]) {
 		unlink(newname);
 		fits_create_file(&tmp, newname, &status);
 
-		fits_get_img_param(bias[0], 9, &bitpix, &naxis, naxes, &status);
+		fits_get_img_param(photo[i], 9, &bitpix, &naxis, naxes, &status);
 		fits_create_img(tmp, bitpix, naxis, naxes, &status);
 		fits_get_hdu_num(photo[i], &hdupos);
 		status=0;
@@ -788,4 +813,10 @@ int main(int argc, char *argv[]) {
 	free(photo_comb);
 
 	puts("Processing completed");
+	#ifdef _WIN32
+	#else
+	int sec = t0.tv_sec, usec = t0.tv_usec;
+	gettimeofday(&t0, 0);
+	printf("Took %.3lf seconds.\n", ((double)(t0.tv_sec - sec)*1000000 + (t0.tv_usec - usec))/1000000);
+	#endif
 }

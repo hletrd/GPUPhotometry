@@ -32,7 +32,8 @@ __kernel void average_dark(__global float* input, __global float* output, __glob
 		for(int j = 0; j < count; j++) { \n\
 			output[num+i] += input[j*imgsize+num+i]; \n\
 		} \n\
-		output[num+i] /= count - input_bias[num+i]; \n\
+		output[num+i] /= count; \n\
+		output[num+i] -= input_bias[num+i]; \n\
 	} \n\
 }";
 
@@ -275,12 +276,12 @@ int main(int argc, char *argv[]) {
 		}
 		mempos += imgsize_mem;
 	}
-	puts("Combining bias...");
 
 	if (cnt_bias > 0) {
 		for(int i=0; i<realx*realy*cnt_bias; i++) {
 			pixels_single[i] = (float)pixels[i];
 		}
+		puts("Combining bias...");
 		count = realy;
 		program = clCreateProgramWithSource(context, 1, (const char **)&OpenCL_average, NULL, &err);
 		if (!program) {
@@ -368,11 +369,10 @@ int main(int argc, char *argv[]) {
 		}
 		mempos += imgsize_mem;
 	}
-	puts("Combining dark & Subtracting bias...");
-
 	for(int i=0; i<realx*realy*cnt_dark; i++) {
 		pixels_single[i] = (float)pixels[i];
 	}
+	puts("Combining dark & Subtracting bias...");
 	count = realy;
 	program = clCreateProgramWithSource(context, 1, (const char **)&OpenCL_average, NULL, &err);
 	if (!program) {
@@ -464,12 +464,11 @@ int main(int argc, char *argv[]) {
 		}
 		mempos += imgsize_mem;
 	}
-	puts("Combining flat & Subtracting bias, dark...");
-
 	for(int i=0; i<realx*realy*cnt_flat; i++) {
 		pixels_single[i] = (float)pixels[i];
 	}
 	count = realy;
+	puts("Combining flat & Subtracting bias, dark...");
 	program = clCreateProgramWithSource(context, 1, (const char **)&OpenCL_median, NULL, &err);
 	if (!program) {
 		printf("Error: Failed to create OpenCL program.\n");
@@ -552,10 +551,11 @@ int main(int argc, char *argv[]) {
 	free(pixels_single);
 	clReleaseMemObject(input);
 	clReleaseMemObject(output);
+	clReleaseMemObject(input_dark);
+	clReleaseMemObject(input_exptime_flat);
+	clReleaseMemObject(input_bias);
 	clReleaseProgram(program);
 	clReleaseKernel(kernel);
-
-
 
 	pixels = (double*)malloc(cnt_photo*realx*realy*sizeof(double));
 	pixels_single = (float*)malloc(cnt_photo*realx*realy*sizeof(float));
@@ -660,12 +660,14 @@ int main(int argc, char *argv[]) {
 	free(pixels_single);
 	clReleaseMemObject(input);
 	clReleaseMemObject(output);
+	clReleaseMemObject(input_bias);
+	clReleaseMemObject(input_dark);
+	clReleaseMemObject(input_flat);
+	clReleaseMemObject(input_exptime_photo);
 	clReleaseProgram(program);
 	clReleaseKernel(kernel);
 
-	free(bias_comb);
-	free(dark_comb);
-	free(flat_comb);
+	puts("Saving outputs...");
 
 	fitsfile *tmp;
 
@@ -676,8 +678,10 @@ int main(int argc, char *argv[]) {
 	char buf[100];
 	int hdupos;
 
-	fits_create_img(tmp, bitpix, naxis, naxes, &status);
-	fits_get_hdu_num(photo[i], &hdupos);
+
+	free(bias_comb);
+	free(dark_comb);
+	free(flat_comb);
 
 	for(int i = 0; i < cnt_photo; i++) {
 		char *newname = malloc(strlen(nphoto[i])+10);
@@ -686,14 +690,14 @@ int main(int argc, char *argv[]) {
 		unlink(newname);
 		fits_create_file(&tmp, newname, &status);
 
-		fits_get_img_param(photo[i], 9, &bitpix, &naxis, naxes, &status);
+		fits_get_img_param(bias[0], 9, &bitpix, &naxis, naxes, &status);
 		fits_create_img(tmp, bitpix, naxis, naxes, &status);
 		fits_get_hdu_num(photo[i], &hdupos);
 		status=0;
 		for(; !status; hdupos++) {
 			fits_get_hdrspace(photo[i], &nkeys, NULL, &status);
 			for(int j=1; j<=nkeys; j++) {
-				fits_read_record(photo[i], i, buf, &status);
+				fits_read_record(photo[i], j, buf, &status);
 				fits_write_record(tmp, buf, &status);
 			}
 			fits_movrel_hdu(photo[i], 1, NULL, &status);

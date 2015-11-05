@@ -21,7 +21,7 @@ fitsfile *flat[filecnt_max];
 fitsfile *photo[filecnt_max];
 fitsfile *tmp;
 
-const char *OpenCL_average = " \n\
+const char *OpenCL_kernel = "\n\
 __kernel void average(__global float* input, __global float* output, int xsize, int ysize, int imgsize, int count) { \n\
 	int num = get_global_id(0)*xsize; \n\
 	for(int i = 0; i < xsize; i++) { \n\
@@ -40,9 +40,7 @@ __kernel void average_dark(__global float* input, __global float* output, __glob
 		output[num+i] /= count; \n\
 		output[num+i] -= input_bias[num+i]; \n\
 	} \n\
-}";
-
-const char *OpenCL_median = " \n\
+}\n\
 #define SWAP(a,b) temp=(a);(a)=(b);(b)=temp; \n\
 inline float qselect(float *arr, int n, int k) { \n\
 	int i,ir,j,l,mid; \n\
@@ -93,9 +91,7 @@ __kernel void median_flat(__global float* input, __global float* output, __globa
 		} \n\
 		output[num+i] = qselect(inp, count, mid) - input_bias[num+i]; \n\
 	} \n\
-}";
-
-const char *OpenCL_photo = "\n\
+}\n\
 __kernel void photo(__global float* input, __global float* output, __global float* input_bias, __global float* input_dark, __global float* input_flat, __global float* exptime_photo, float exptime_dark, int xsize, int ysize, int imgsize, int count, float flat_avg) { \n\
 	int num = get_global_id(0)*xsize; \n\
 	for(int i = 0; i < xsize; i++) { \n\
@@ -110,6 +106,7 @@ int main(int argc, char *argv[]) {
 	#else
 	struct timeval t0;
 	gettimeofday(&t0, 0);
+	int sec, usec;
 	#endif
 	FILE *config;
 	long imgsize[100];
@@ -176,6 +173,22 @@ int main(int argc, char *argv[]) {
 		return EXIT_FAILURE;
 	}
 
+	program = clCreateProgramWithSource(context, 1, (const char **)&OpenCL_kernel, NULL, &err);
+	if (!program) {
+		printf("Error: Failed to create OpenCL program.\n");
+		return EXIT_FAILURE;
+	}
+	err = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
+	if (err != CL_SUCCESS) {
+		size_t len;
+		char buffer[2048];
+
+		printf("Error: Failed to build program executable!\n");
+		clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &len);
+		printf("%s\n", buffer);
+		return EXIT_FAILURE;
+	}
+
 	fscanf(config, "%d", &cnt_bias);
 	fscanf(config, "%d", &cnt_dark);
 	fscanf(config, "%d", &cnt_flat);
@@ -200,7 +213,7 @@ int main(int argc, char *argv[]) {
 	int status;
 	puts("Reading files...");
 	for (int i=0; i<cnt_bias; i++) {
-		fits_open_file(&bias[i], nbias[i], READONLY, &status);
+		fits_open_diskfile(&bias[i], nbias[i], READONLY, &status);
 		if (status) {
 			printf("Error reading bias file %s\n", nbias[i]);
 			return status;
@@ -217,7 +230,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	for (int i=0; i<cnt_dark; i++) {
-		fits_open_file(&dark[i], ndark[i], READONLY, &status);
+		fits_open_diskfile(&dark[i], ndark[i], READONLY, &status);
 		if (status) {
 			printf("Error reading dark file %s\n", ndark[i]);
 			return status;
@@ -239,7 +252,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	for (int i=0; i<cnt_flat; i++) {
-		fits_open_file(&flat[i], nflat[i], READONLY, &status);
+		fits_open_diskfile(&flat[i], nflat[i], READONLY, &status);
 		if (status) {
 			printf("Error reading flat file %s\n", nflat[i]);
 			return status;
@@ -257,7 +270,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	for (int i=0; i<cnt_photo; i++) {
-		fits_open_file(&photo[i], nphoto[i], READONLY, &status);
+		fits_open_diskfile(&photo[i], nphoto[i], READONLY, &status);
 		if (status) {
 			printf("Error reading dark file %s\n", nphoto[i]);
 			return status;
@@ -282,7 +295,6 @@ int main(int argc, char *argv[]) {
 
 
 
-
 	float *pixels_single = (float*)malloc(cnt_bias*realx*realy*sizeof(float));
 	if (pixels_single == NULL) {
 		printf("Error: failed to allocate %ldbytes of memory.", cnt_bias*realx*realy*sizeof(float));
@@ -303,21 +315,6 @@ int main(int argc, char *argv[]) {
 	if (cnt_bias > 0) {
 		puts("Combining bias...");
 		count = realy;
-		program = clCreateProgramWithSource(context, 1, (const char **)&OpenCL_average, NULL, &err);
-		if (!program) {
-			printf("Error: Failed to create OpenCL program.\n");
-			return EXIT_FAILURE;
-		}
-		err = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
-		if (err != CL_SUCCESS) {
-			size_t len;
-			char buffer[2048];
-
-			printf("Error: Failed to build program executable!\n");
-			clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &len);
-			printf("%s\n", buffer);
-			return EXIT_FAILURE;
-		}
 		kernel = clCreateKernel(program, "average", &err);
 		if (!kernel || err != CL_SUCCESS) {
 			printf("Error: Failed to create OpenCL kernel.\n");
@@ -366,10 +363,8 @@ int main(int argc, char *argv[]) {
 
 		clReleaseMemObject(input);
 		clReleaseMemObject(output);
-		clReleaseProgram(program);
 		clReleaseKernel(kernel);
 	}
-
 
 	free(pixels_single);
 	pixels_single = (float*)malloc(cnt_dark*realx*realy*sizeof(float));
@@ -387,21 +382,6 @@ int main(int argc, char *argv[]) {
 	}
 	puts("Combining dark & Subtracting bias...");
 	count = realy;
-	program = clCreateProgramWithSource(context, 1, (const char **)&OpenCL_average, NULL, &err);
-	if (!program) {
-		printf("Error: Failed to create OpenCL program.\n");
-		return EXIT_FAILURE;
-	}
-	err = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
-	if (err != CL_SUCCESS) {
-		size_t len;
-		char buffer[2048];
-
-		printf("Error: Failed to build program executable!\n");
-		clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &len);
-		printf("%s\n", buffer);
-		return EXIT_FAILURE;
-	}
 	kernel = clCreateKernel(program, "average_dark", &err);
 	if (!kernel || err != CL_SUCCESS) {
 		printf("Error: Failed to create OpenCL kernel.\n");
@@ -454,7 +434,6 @@ int main(int argc, char *argv[]) {
 	clReleaseMemObject(input);
 	clReleaseMemObject(output);
 	clReleaseMemObject(input_bias);
-	clReleaseProgram(program);
 	clReleaseKernel(kernel);
 
 
@@ -476,21 +455,6 @@ int main(int argc, char *argv[]) {
 	}
 	count = realy;
 	puts("Combining flat & Subtracting bias, dark...");
-	program = clCreateProgramWithSource(context, 1, (const char **)&OpenCL_median, NULL, &err);
-	if (!program) {
-		printf("Error: Failed to create OpenCL program.\n");
-		return EXIT_FAILURE;
-	}
-	err = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
-	if (err != CL_SUCCESS) {
-		size_t len;
-		char buffer[2048];
-
-		printf("Error: Failed to build program executable!\n");
-		clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &len);
-		printf("%s\n", buffer);
-		return EXIT_FAILURE;
-	}
 	kernel = clCreateKernel(program, "median_flat", &err);
 	if (!kernel || err != CL_SUCCESS) {
 		printf("Error: Failed to create OpenCL kernel.\n");
@@ -560,7 +524,6 @@ int main(int argc, char *argv[]) {
 	clReleaseMemObject(input_dark);
 	clReleaseMemObject(input_exptime_flat);
 	clReleaseMemObject(input_bias);
-	clReleaseProgram(program);
 	clReleaseKernel(kernel);
 
 
@@ -581,21 +544,6 @@ int main(int argc, char *argv[]) {
 	}
 	puts("Combining photo...");
 	count = realy;
-	program = clCreateProgramWithSource(context, 1, (const char **)&OpenCL_photo, NULL, &err);
-	if (!program) {
-		printf("Error: Failed to create OpenCL program.\n");
-		return EXIT_FAILURE;
-	}
-	err = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
-	if (err != CL_SUCCESS) {
-		size_t len;
-		char buffer[2048];
-
-		printf("Error: Failed to build program executable!\n");
-		clGetProgramBuildInfo(program, device_id, CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &len);
-		printf("%s\n", buffer);
-		return EXIT_FAILURE;
-	}
 	kernel = clCreateKernel(program, "photo", &err);
 	if (!kernel || err != CL_SUCCESS) {
 		printf("Error: Failed to create OpenCL kernel.\n");
@@ -730,7 +678,7 @@ int main(int argc, char *argv[]) {
 	puts("Processing completed");
 	#ifdef _WIN32
 	#else
-	int sec = t0.tv_sec, usec = t0.tv_usec;
+	sec = t0.tv_sec, usec = t0.tv_usec;
 	gettimeofday(&t0, 0);
 	printf("Took %.3lf seconds.\n", ((double)(t0.tv_sec - sec)*1000000 + (t0.tv_usec - usec))/1000000);
 	#endif

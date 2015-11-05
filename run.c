@@ -19,6 +19,7 @@ fitsfile *bias[filecnt_max];
 fitsfile *dark[filecnt_max];
 fitsfile *flat[filecnt_max];
 fitsfile *photo[filecnt_max];
+fitsfile *tmp;
 
 const char *OpenCL_average = " \n\
 __kernel void average(__global float* input, __global float* output, int xsize, int ysize, int imgsize, int count) { \n\
@@ -294,10 +295,8 @@ int main(int argc, char *argv[]) {
 	pixeli[1] = 1;
 	int mempos = 0;
 	puts("Loading bias files...");
-	for(int j=0; j<cnt_bias; j++){
-		for(pixeli[1]=realy; pixeli[1]>0; pixeli[1]--){
-			fits_read_pix(bias[j], TFLOAT, pixeli, realx, NULL, pixels_single+realx*pixeli[1]-realx+mempos, NULL, &status);
-		}
+	for(int j=0; j<cnt_bias; j++) {
+		fits_read_pix(bias[j], TFLOAT, pixeli, realx*realy, NULL, pixels_single+mempos, NULL, &status);
 		mempos += imgsize_mem;
 	}
 
@@ -382,10 +381,8 @@ int main(int argc, char *argv[]) {
 	pixeli[1] = 1;
 	mempos = 0;
 	puts("Loading dark files...");
-	for(int j=0; j<cnt_dark; j++){
-		for(pixeli[1]=realy; pixeli[1]>0; pixeli[1]--){
-			fits_read_pix(dark[j], TFLOAT, pixeli, realx, NULL, pixels_single+realx*pixeli[1]-realx+mempos, NULL, &status);
-		}
+	for(int j=0; j<cnt_dark; j++) {
+		fits_read_pix(dark[j], TFLOAT, pixeli, realx*realy, NULL, pixels_single+mempos, NULL, &status);
 		mempos += imgsize_mem;
 	}
 	puts("Combining dark & Subtracting bias...");
@@ -472,7 +469,7 @@ int main(int argc, char *argv[]) {
 	mempos = 0;
 	puts("Loading flat files...");
 	for(int j=0; j<cnt_flat; j++) {
-		for(pixeli[1]=realy; pixeli[1]>0; pixeli[1]--){
+		for(pixeli[1]=realy; pixeli[1]>0; pixeli[1]--) {
 			fits_read_pix(flat[j], TFLOAT, pixeli, realx, NULL, pixels_single+realx*pixeli[1]-realx+mempos, NULL, &status);
 		}
 		mempos += imgsize_mem;
@@ -577,7 +574,7 @@ int main(int argc, char *argv[]) {
 	mempos = 0;
 	puts("Loading photo files...");
 	for(int j=0; j<cnt_photo; j++) {
-		for(pixeli[1]=realy; pixeli[1]>0; pixeli[1]--){
+		for(pixeli[1]=realy; pixeli[1]>0; pixeli[1]--) {
 			fits_read_pix(photo[j], TFLOAT, pixeli, realx, NULL, pixels_single+realx*pixeli[1]-realx+mempos, NULL, &status);
 		}
 		mempos += imgsize_mem;
@@ -673,94 +670,12 @@ int main(int argc, char *argv[]) {
 
 	puts("Saving outputs...");
 
-	fitsfile *tmp;
-
 	int bitpix;
 	int naxis;
 	long naxes[10];
 	int nkeys;
 	char buf[1000];
 	int hdupos;
-
-	/*if (cnt_bias >= 1) {
-		unlink("bias_combined.fit");
-		fits_create_file(&tmp, "bias_combined.fit", &status);
-		fits_get_img_param(bias[0], 9, &bitpix, &naxis, naxes, &status);
-		fits_create_img(tmp, bitpix, naxis, naxes, &status);
-		fits_get_hdu_num(bias[0], &hdupos);
-
-		status=0;
-		for(; !status; hdupos++) {
-			fits_get_hdrspace(bias[0], &nkeys, NULL, &status);
-			for(int j=1; j<=nkeys; j++) {
-				fits_read_record(bias[0], j, buf, &status);
-				fits_write_record(tmp, buf, &status);
-			}
-			fits_movrel_hdu(bias[0], 1, NULL, &status);
-		}
-		if (status == END_OF_FILE) status = 0;
-
-		if (status != 0) {    
-			fits_report_error(stderr, status);
-			return(status);
-		}
-		fits_write_img(tmp, TFLOAT, 1, (long long)imgsize_mem, bias_comb, &status);
-		fits_close_file(tmp, &status);
-		printf("Saved the combined bias as bias_combined.fit\n");
-	}
-
-	if (cnt_dark >= 1) {
-		unlink("dark_combined.fit");
-		fits_create_file(&tmp, "dark_combined.fit", &status);
-		fits_get_img_param(dark[0], 9, &bitpix, &naxis, naxes, &status);
-		fits_create_img(tmp, bitpix, naxis, naxes, &status);
-		fits_get_hdu_num(dark[0], &hdupos);
-
-		status=0;
-		for(; !status; hdupos++) {
-			fits_get_hdrspace(dark[0], &nkeys, NULL, &status);
-			for(int j=1; j<=nkeys; j++) {
-				fits_read_record(dark[0], j, buf, &status);
-				fits_write_record(tmp, buf, &status);
-			}
-			fits_movrel_hdu(dark[0], 1, NULL, &status);
-		}
-		if (status == END_OF_FILE) status = 0;
-
-		if (status != 0) {    
-			fits_report_error(stderr, status);
-			return(status);
-		}
-		fits_write_img(tmp, TFLOAT, 1, (long long)imgsize_mem, dark_comb, &status);
-		fits_close_file(tmp, &status);
-		printf("Saved the combined dark as dark_combined.fit\n");
-	}*/
-
-	/*if (cnt_flat >= 1) {
-		unlink("flat_combined.fit");
-		fits_create_file(&tmp, "flat_combined.fit", &status);
-		fits_get_img_param(flat[0], 9, &bitpix, &naxis, naxes, &status);
-		fits_create_img(tmp, bitpix, naxis, naxes, &status);
-		fits_get_hdu_num(flat[0], &hdupos);
-
-		status=0;
-		for(; !status; hdupos++) {
-			fits_get_hdrspace(flat[0], &nkeys, NULL, &status);
-			for(int j=1; j<=nkeys; j++) {
-				fits_read_record(flat[0], j, buf, &status);
-				fits_write_record(tmp, buf, &status);
-			}
-			fits_movrel_hdu(flat[0], 1, NULL, &status);
-		}
-		if (status == END_OF_FILE) status = 0;
-		if (status != 0) {    
-			fits_report_error(stderr, status);
-			return(status);
-		}
-		fits_write_img(tmp, TFLOAT, 1, (long long)imgsize_mem, flat_comb, &status);
-		fits_close_file(tmp, &status);
-		printf("Saved the combined flat as flat_combined.fit\n");
-	}*/
 
 	for(int i = 0; i < cnt_photo; i++) {
 		char *newname = malloc(strlen(nphoto[i])+10);

@@ -241,11 +241,11 @@ int main(int argc, char *argv[]) {
 	range = stdev;
 	min = (int)avg - (int)(stdev);
 
-	//mag = atof(argv[2]);
+	if (argv[2]) mag = atof(argv[2]);
 
 	app = gtk_application_new("com.hletrd.viewer", G_APPLICATION_FLAGS_NONE);
 	g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);
-	status = g_application_run(G_APPLICATION(app), argc, argv_tmp);
+	status = g_application_run(G_APPLICATION(app), 0, argv_tmp);
 	g_object_unref(app);
 	if(status) fprintf(stderr, "GTK error\n");
 

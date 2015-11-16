@@ -1,6 +1,7 @@
 #include <gtk/gtk.h>
 #include <stdlib.h>
 #include <math.h>
+#include "image.h"
 #ifdef __APPLE__
 	#include "/usr/local/Cellar/cfitsio/3.370/include/fitsio.h"
 #else
@@ -12,6 +13,7 @@ GtkWidget *container;
 GtkWidget *button_box1, *button1, *button_box2, *button2;
 GtkWidget *label1, *label2, *label_status, *label_diff;
 GtkWidget *label_adu, *label_sky, *button_sky, *buttonbox_sky, *button_reset, *buttonbox_reset, *label_stat, *label_mag;
+GtkWidget *scroll;
 int imgx, imgy;
 int imgsize_mem;
 int min, max;
@@ -34,21 +36,6 @@ static void click1(GtkWidget *widget, gpointer data) {
 static void click2(GtkWidget *widget, gpointer data) {
 	gtk_label_set_text(GTK_LABEL(label_status), "Selecting target star");
 	mode = 2;
-}
-
-gboolean draw_callback(GtkWidget *widget, cairo_t *cr, gpointer data) {
-	double pixelval;
-	cairo_set_line_width(cr, 1);
-	for (int i = 0; i < imgy * mag; i++) {
-		for (int j = 0; j < imgx * mag; j++) {
-			pixelval = (pixels[(int)(i/mag*imgx+j/mag)] - min) / range / 3;
-			cairo_set_source_rgb(cr, pixelval, pixelval, pixelval);
-			cairo_move_to(cr, j, i);
-			cairo_line_to(cr, j, i+1);
-			cairo_stroke(cr);
-		}
-	}
-	return 0;
 }
 
 gboolean button_press_callback(GtkWidget *eventbox, GdkEventButton *event, gpointer data) {
@@ -83,6 +70,7 @@ gboolean button_press_callback(GtkWidget *eventbox, GdkEventButton *event, gpoin
 	}
 	mode = 0;
 	gtk_label_set_text(GTK_LABEL(label_status), "Select mode");
+	printf("%f\n", event->x);
 	return 0;
 }
 
@@ -115,19 +103,25 @@ gboolean sky_reset(GtkWidget *eventbox, GdkEventButton *event, gpointer data) {
 static void activate(GtkApplication* app, gpointer user_data) {
 	window = gtk_application_window_new(app);
 	gtk_window_set_title(GTK_WINDOW(window), "FITS Viewer");
-	gtk_window_set_default_size(GTK_WINDOW(window), (int)imgx*mag, (int)imgx*mag+100);
+	gtk_window_set_default_size(GTK_WINDOW(window), 768, 900);
 	gtk_widget_show_all(window);
 
-	canvas = gtk_drawing_area_new();
-	gtk_widget_set_size_request(canvas, (int)imgx*mag, (int)imgx*mag);
-	g_signal_connect(G_OBJECT(canvas), "draw", G_CALLBACK(draw_callback), NULL);
-	
+	//canvas = gtk_drawing_area_new();
+	//gtk_widget_set_size_request(canvas, (int)imgx*mag, (int)imgx*mag);
+	//g_signal_connect(G_OBJECT(canvas), "draw", G_CALLBACK(draw_callback), NULL);
+	canvas = gtk_image_new_from_file("tmp.bmp");
+
 	eventbox = gtk_event_box_new();
 	gtk_container_add(GTK_CONTAINER(eventbox), canvas);
 	g_signal_connect(G_OBJECT(eventbox), "button_press_event", G_CALLBACK(button_press_callback), canvas);
 
 	gtk_widget_add_events(eventbox, GDK_POINTER_MOTION_MASK);
 	g_signal_connect(G_OBJECT(eventbox), "motion-notify-event", G_CALLBACK(mousemove_callback), canvas);
+
+	scroll = gtk_scrolled_window_new(NULL, NULL);
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_ALWAYS, GTK_POLICY_ALWAYS);
+	gtk_widget_set_size_request(scroll, 768, 768);
+	gtk_container_add(GTK_CONTAINER(scroll), eventbox);
 
 
 	container = gtk_grid_new();
@@ -202,7 +196,7 @@ static void activate(GtkApplication* app, gpointer user_data) {
 	gtk_grid_attach(GTK_GRID(container), label_status, 0, 6, 4, 1);
 
 
-	gtk_grid_attach(GTK_GRID(container), eventbox, 0, 0, 4, 1);
+	gtk_grid_attach(GTK_GRID(container), scroll, 0, 0, 4, 1);
 	gtk_widget_show_all(window);
 }
 
@@ -241,7 +235,21 @@ int main(int argc, char *argv[]) {
 	range = stdev;
 	min = (int)avg - (int)(stdev);
 
-	if (argv[2]) mag = atof(argv[2]);
+	if (argc >= 3) mag = atof(argv[2]);
+
+	struct image bmp;
+	int pixelval;
+	newImage(&bmp, (int)(imgx * mag), (int)(imgy * mag));
+	for (int i = 0; i < imgy * mag; i++) {
+		for (int j = 0; j < imgx * mag; j++) {
+			pixelval = (double)((pixels[(int)(i/mag*imgx+j/mag)] - min) / range / 3 * 256);
+			setPixelData(&bmp, j, i, pixelval);		
+		}
+	}
+	unlink("tmp.bmp");
+	FILE *tmp = fopen("tmp.bmp", "w");
+	saveImage(bmp, tmp);
+	unloadImage(&bmp);
 
 	app = gtk_application_new("com.hletrd.viewer", G_APPLICATION_FLAGS_NONE);
 	g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);

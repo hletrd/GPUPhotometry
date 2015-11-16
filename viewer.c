@@ -25,6 +25,9 @@ long long int sum_sky = 0;
 int cnt_sky = 0;
 double avg = 0, stdev = 0;
 double mag1, mag2;
+int viewerx, viewery;
+
+int apsize = 5;
 
 int adu;
 
@@ -39,49 +42,74 @@ static void click2(GtkWidget *widget, gpointer data) {
 }
 
 gboolean button_press_callback(GtkWidget *eventbox, GdkEventButton *event, gpointer data) {
+	int x = event->x, y = event->y;
+	if (viewerx == 768 || viewery == 768) {
+		x -= (768 - imgx * mag) / 2;
+		y -= (768 - imgy * mag) / 2;
+	}
+	if (x < 0 || y < 0 || x >= imgx * mag || y >= imgy * mag) return 0;
+	int pixval = 0;
+	for (int i = -(apsize/2); i <= (apsize/2); i++) {
+		for (int j = -(apsize/2); j <= (apsize/2); j++) {
+			pixval += pixels[(int)((x+i)/mag + (y+j)*imgx/mag)];
+		}
+	}
+	pixval /= apsize * apsize;
 	char s[100];
 	if (mode == 1) {
 		if (cnt_sky) {
-			sprintf(s, "Reference: %lf", -2.5 * log10(pixels[(int)(event->x/mag + event->y*imgx/mag)] - (double)sum_sky / cnt_sky));
-			mag1 = -2.5 * log10(pixels[(int)(event->x/mag + event->y*imgx/mag)] - (double)sum_sky / cnt_sky);
+			sprintf(s, "Reference: %lf", -2.5 * log10(pixval - (double)sum_sky / cnt_sky));
+			mag1 = -2.5 * log10(pixval - (double)sum_sky / cnt_sky);
 		} else {
-			sprintf(s, "Reference: %lf", -2.5 * log10(pixels[(int)(event->x/mag + event->y*imgx/mag)]));
-			mag1 = -2.5 * log10(pixels[(int)(event->x/mag + event->y*imgx/mag)]);
+			sprintf(s, "Reference: %lf", -2.5 * log10(pixval));
+			mag1 = -2.5 * log10(pixval);
 		}
 		gtk_label_set_text(GTK_LABEL(label1), s);
 		sprintf(s, "Difference: %lf", mag2 - mag1);
 		gtk_label_set_text(GTK_LABEL(label_diff), s);
 	} else if (mode == 2) {
 		if (cnt_sky) {
-			sprintf(s, "Target: %lf", -2.5 * log10(pixels[(int)(event->x/mag + event->y*imgx/mag)] - (double)sum_sky / cnt_sky));
-			mag2 = -2.5 * log10(pixels[(int)(event->x/mag + event->y*imgx/mag)] - (double)sum_sky / cnt_sky);
+			sprintf(s, "Target: %lf", -2.5 * log10(pixval - (double)sum_sky / cnt_sky));
+			mag2 = -2.5 * log10(pixval - (double)sum_sky / cnt_sky);
 		} else {
-			sprintf(s, "Target: %lf", -2.5 * log10(pixels[(int)(event->x/mag + event->y*imgx/mag)]));
-			mag2 = -2.5 * log10(pixels[(int)(event->x/mag + event->y*imgx/mag)]);
+			sprintf(s, "Target: %lf", -2.5 * log10(pixval));
+			mag2 = -2.5 * log10(pixval);
 		}
 		gtk_label_set_text(GTK_LABEL(label2), s);
 		sprintf(s, "Difference: %lf", mag2 - mag1);
 		gtk_label_set_text(GTK_LABEL(label_diff), s);
 	} else if (mode == 3) {
-		sum_sky += pixels[(int)(event->x/mag + event->y*imgx/mag)];
+		sum_sky += pixval;
 		cnt_sky++;
 		sprintf(s, "Sky value: %lf", (double)sum_sky / cnt_sky);
 		gtk_label_set_text(GTK_LABEL(label_sky), s);
 	}
 	mode = 0;
 	gtk_label_set_text(GTK_LABEL(label_status), "Select mode");
-	printf("%f\n", event->x);
 	return 0;
 }
 
 gboolean mousemove_callback(GtkWidget *eventbox, GdkEventButton *event, gpointer data) {
+	int x = event->x, y = event->y;
+	if (viewerx == 768 || viewery == 768) {
+		x -= (768 - imgx * mag) / 2;
+		y -= (768 - imgy * mag) / 2;
+	}
+	if (x < 0 || y < 0 || x > imgx * mag || y > imgy * mag) return 0;
+	int pixval = 0;
+	for (int i = -(apsize/2); i <= (apsize/2); i++) {
+		for (int j = -(apsize/2); j <= (apsize/2); j++) {
+			pixval += pixels[(int)((x+i)/mag + (y+j)*imgx/mag)];
+		}
+	}
+	pixval /= apsize * apsize;
 	char s[100];
-	sprintf(s, "ADU at cursor: %d", pixels[(int)(event->x/mag + event->y*imgx/mag)]);
+	sprintf(s, "ADU at cursor: %d", pixval);
 	gtk_label_set_text(GTK_LABEL(label_adu), s);
 	if (cnt_sky) {
-		sprintf(s, "Mag at cursor: %lf", -2.5 * log10(pixels[(int)(event->x/mag + event->y*imgx/mag)] - (double)sum_sky / cnt_sky));
+		sprintf(s, "Mag at cursor: %lf", -2.5 * log10(pixval - (double)sum_sky / cnt_sky));
 	} else {
-		sprintf(s, "Mag at cursor: %lf", -2.5 * log10(pixels[(int)(event->x/mag + event->y*imgx/mag)]));
+		sprintf(s, "Mag at cursor: %lf", -2.5 * log10(pixval));
 	}
 	gtk_label_set_text(GTK_LABEL(label_mag), s);
 	return 0;
@@ -100,6 +128,11 @@ gboolean sky_reset(GtkWidget *eventbox, GdkEventButton *event, gpointer data) {
 	return 0;
 }
 
+void getsize(GtkWidget *widget, GtkAllocation *allocation, void *data) {
+	viewerx = allocation->width;
+	viewery = allocation->height;
+}
+
 static void activate(GtkApplication* app, gpointer user_data) {
 	window = gtk_application_window_new(app);
 	gtk_window_set_title(GTK_WINDOW(window), "FITS Viewer");
@@ -114,6 +147,7 @@ static void activate(GtkApplication* app, gpointer user_data) {
 	eventbox = gtk_event_box_new();
 	gtk_container_add(GTK_CONTAINER(eventbox), canvas);
 	g_signal_connect(G_OBJECT(eventbox), "button_press_event", G_CALLBACK(button_press_callback), canvas);
+	g_signal_connect(eventbox, "size-allocate", G_CALLBACK(getsize), NULL);
 
 	gtk_widget_add_events(eventbox, GDK_POINTER_MOTION_MASK);
 	g_signal_connect(G_OBJECT(eventbox), "motion-notify-event", G_CALLBACK(mousemove_callback), canvas);
@@ -236,6 +270,8 @@ int main(int argc, char *argv[]) {
 	min = (int)avg - (int)(stdev);
 
 	if (argc >= 3) mag = atof(argv[2]);
+	if (argc >= 4) apsize = atoi(argv[3]);
+
 
 	struct image bmp;
 	int pixelval;
@@ -243,7 +279,7 @@ int main(int argc, char *argv[]) {
 	for (int i = 0; i < imgy * mag; i++) {
 		for (int j = 0; j < imgx * mag; j++) {
 			pixelval = (double)((pixels[(int)(i/mag*imgx+j/mag)] - min) / range / 3 * 256);
-			setPixelData(&bmp, j, i, pixelval);		
+			setPixelData(&bmp, j, (int)imgy*mag-i, pixelval);		
 		}
 	}
 	unlink("tmp.bmp");

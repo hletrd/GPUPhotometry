@@ -69,7 +69,8 @@ make install
  * It is not recommended to install GTK+3 on CentOS 6. Please consider using CentOS 7, on which GTK+3 is installed by default.
 
 ### Running
-* ./viewer (filename of FITS file) (magnification)
+* ./viewer (filename of FITS file) (magnification) (aperture size)
 ```
-./viewer myfitsfile.fit 0.25
+./viewer myfitsfile.fit 0.25 5
 ```
+ * Above arguments will use 25% magnification, 5x5 aperture.

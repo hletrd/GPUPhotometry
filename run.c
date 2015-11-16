@@ -674,31 +674,5 @@ int main(int argc, char *argv[]) {
 	free(bias_comb);
 	free(dark_comb);
 	free(flat_comb);
-
-	fprintf(stderr, "Processing completed\n");
-	#ifdef _WIN32
-	#else
-	sec = t0.tv_sec, usec = t0.tv_usec;
-	gettimeofday(&t0, 0);
-	fprintf(stderr, "Took %.3lf seconds.\n", ((double)(t0.tv_sec - sec)*1000000 + (t0.tv_usec - usec))/1000000);
-	#endif
-
-	float min = 1e10, max = 0;
-	for(int i = 0; i < imgsize_mem_int; i++) {
-		if (photo_comb[i] < min) min = photo_comb[i];
-		if (photo_comb[i] > max) max = photo_comb[i];
-	}
-	fprintf(stdout, "var width = %d, height = %d;\n", realx, realy);
-	fprintf(stdout, "var max = %d, min = %d;\n", max, min);
-	fprintf(stdout, "var data = [");
-	for(int i = 0; i < realy; i++) {
-		fprintf(stdout, "[");
-		for(int j = 0; j < realx-1; j++) {
-			fprintf(stdout, "%.0f,", photo_comb[i*realx + j]);
-		}
-		fprintf(stdout, "%.0f],", photo_comb[i*realx + realx-1]);
-	}
-	fprintf(stdout, "[]];");
-	fclose(stdout);
 	free(photo_comb);
 }

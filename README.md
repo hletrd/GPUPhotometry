@@ -12,6 +12,11 @@
   * 5th: count of light frames
  * from 6th line, type in filenames in order.
 
+## How to run
+```
+./pm config.txt >> output.json
+```
+
 ## How to install dependencies
 * OS X
 ```

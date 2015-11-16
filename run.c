@@ -1,9 +1,10 @@
 #ifdef __APPLE__
 	#include "/usr/local/Cellar/cfitsio/3.370/include/fitsio.h"
+	#include <OpenCL/opencl.h>
 #else
 	#include "fitsio.h"
+	#include <CL/cl.h>
 #endif
-#include <OpenCL/opencl.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>

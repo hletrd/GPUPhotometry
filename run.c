@@ -675,4 +675,12 @@ int main(int argc, char *argv[]) {
 	free(dark_comb);
 	free(flat_comb);
 	free(photo_comb);
+
+	fprintf(stderr, "Processing completed\n");
+	#ifdef _WIN32
+	#else
+	sec = t0.tv_sec, usec = t0.tv_usec;
+	gettimeofday(&t0, 0);
+	fprintf(stderr, "Took %.3lf seconds.\n", ((double)(t0.tv_sec - sec)*1000000 + (t0.tv_usec - usec))/1000000);
+	#endif
 }

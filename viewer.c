@@ -1,6 +1,7 @@
 #include <gtk/gtk.h>
 #include <stdlib.h>
 #include <math.h>
+#include <unistd.h>
 #include "image.h"
 #ifdef __APPLE__
 	#include "/usr/local/Cellar/cfitsio/3.370/include/fitsio.h"

@@ -15,6 +15,9 @@ GtkWidget *button_box1, *button1, *button_box2, *button2;
 GtkWidget *label1, *label2, *label_status, *label_diff;
 GtkWidget *label_adu, *label_sky, *button_sky, *buttonbox_sky, *button_reset, *buttonbox_reset, *label_stat, *label_mag;
 GtkWidget *scroll;
+GdkPixbuf *pixbuf, *pixbuf2;
+cairo_surface_t *surface;
+cairo_t *cr;
 int imgx, imgy;
 int imgsize_mem;
 int min, max;
@@ -44,18 +47,20 @@ static void click2(GtkWidget *widget, gpointer data) {
 
 gboolean button_press_callback(GtkWidget *eventbox, GdkEventButton *event, gpointer data) {
 	int x = event->x, y = event->y;
+	int pixcnt = 0;
 	if (viewerx == 768 || viewery == 768) {
 		x -= (768 - imgx * mag) / 2;
 		y -= (768 - imgy * mag) / 2;
 	}
 	if (x < 0 || y < 0 || x >= imgx * mag || y >= imgy * mag) return 0;
 	int pixval = 0;
-	for (int i = -(apsize/2); i <= (apsize/2); i++) {
-		for (int j = -(apsize/2); j <= (apsize/2); j++) {
+	for (int i = -apsize; i <= apsize; i++) {
+		for (int j = -((int)sqrt(apsize * apsize - i * i)); j*j + i*i <= apsize*apsize; j++) {
 			pixval += pixels[(int)((x+i)/mag + (y+j)*imgx/mag)];
+			pixcnt++;
 		}
 	}
-	pixval /= apsize * apsize;
+	pixval /= pixcnt;
 	char s[100];
 	if (mode == 1) {
 		if (cnt_sky) {
@@ -92,18 +97,20 @@ gboolean button_press_callback(GtkWidget *eventbox, GdkEventButton *event, gpoin
 
 gboolean mousemove_callback(GtkWidget *eventbox, GdkEventButton *event, gpointer data) {
 	int x = event->x, y = event->y;
+	int pixcnt = 0;
 	if (viewerx == 768 || viewery == 768) {
 		x -= (768 - imgx * mag) / 2;
 		y -= (768 - imgy * mag) / 2;
 	}
 	if (x < 0 || y < 0 || x > imgx * mag || y > imgy * mag) return 0;
 	int pixval = 0;
-	for (int i = -(apsize/2); i <= (apsize/2); i++) {
-		for (int j = -(apsize/2); j <= (apsize/2); j++) {
+	for (int i = -apsize; i <= apsize; i++) {
+		for (int j = -((int)sqrt(apsize * apsize - i * i)); j*j + i*i <= apsize*apsize; j++) {
 			pixval += pixels[(int)((x+i)/mag + (y+j)*imgx/mag)];
+			pixcnt++;
 		}
 	}
-	pixval /= apsize * apsize;
+	pixval /= pixcnt;
 	char s[100];
 	sprintf(s, "ADU at cursor: %d", pixval);
 	gtk_label_set_text(GTK_LABEL(label_adu), s);
@@ -111,6 +118,20 @@ gboolean mousemove_callback(GtkWidget *eventbox, GdkEventButton *event, gpointer
 		sprintf(s, "Mag at cursor: %lf", -2.5 * log10(pixval - (double)sum_sky / cnt_sky));
 	} else {
 		sprintf(s, "Mag at cursor: %lf", -2.5 * log10(pixval));
+	}
+	if (x >= 0 && y >= 0 && x <= imgx && y <= imgy) {
+		surface = cairo_image_surface_create(CAIRO_FORMAT_RGB24, imgx, imgy);
+		cr = cairo_create(surface);
+		gdk_cairo_set_source_pixbuf(cr, pixbuf, 0, 0);
+		cairo_set_line_width(cr, 2.0);
+		cairo_paint(cr);
+		cairo_set_source_rgb(cr, 1, 1, 0);
+		cairo_arc(cr, x, y, apsize*mag, 0, 2*M_PI);
+		cairo_stroke(cr);
+		pixbuf2 = gdk_pixbuf_get_from_surface(surface, 0, 0, imgx*mag, imgy*mag);
+		gtk_image_set_from_pixbuf(GTK_IMAGE(canvas), pixbuf2);
+		cairo_surface_destroy(surface);
+		cairo_destroy(cr);
 	}
 	gtk_label_set_text(GTK_LABEL(label_mag), s);
 	return 0;
@@ -143,7 +164,10 @@ static void activate(GtkApplication* app, gpointer user_data) {
 	//canvas = gtk_drawing_area_new();
 	//gtk_widget_set_size_request(canvas, (int)imgx*mag, (int)imgx*mag);
 	//g_signal_connect(G_OBJECT(canvas), "draw", G_CALLBACK(draw_callback), NULL);
-	canvas = gtk_image_new_from_file("tmp.bmp");
+	canvas = gtk_image_new();
+	GError **error = NULL;
+	pixbuf = gdk_pixbuf_new_from_file("tmp.bmp", error);
+	gtk_image_set_from_pixbuf(GTK_IMAGE(canvas), pixbuf);
 
 	eventbox = gtk_event_box_new();
 	gtk_container_add(GTK_CONTAINER(eventbox), canvas);

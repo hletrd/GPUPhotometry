@@ -12,8 +12,8 @@
     #define M_PI 3.141592653589793238462643383279
 #endif
 #ifndef gtk_widget_set_margin_start
-	#define gtk_widget_set_margin_start(a) gtk_widget_set_margin_left(a)
-	#define gtk_widget_set_margin_end(a) gtk_widget_set_margin_right(a)
+	#define gtk_widget_set_margin_start(a, b) gtk_widget_set_margin_left(a, b)
+	#define gtk_widget_set_margin_end(a, b) gtk_widget_set_margin_right(a, b)
 #endif
 fitsfile *file;
 GtkWidget *window, *window_sub, *window_zoom, *window_options;

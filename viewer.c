@@ -21,6 +21,7 @@ GtkWidget *combo, *combo_prev;
 GtkWidget *label_zoom1, *label_zoom2;
 GtkListStore *liststore;
 GtkCellRenderer *column;
+GtkWidget *histoprev;
 int zoom_lastx, zoom_lasty;
 cairo_surface_t *surface;
 cairo_t *cr;
@@ -37,6 +38,7 @@ int cnt_sky = 0;
 double avg = 0, stdev = 0;
 double mag1, mag2;
 int viewerx, viewery;
+int histogram[512];
 
 int apsize = 5;
 
@@ -337,6 +339,27 @@ void combosel_prev() {
 	resize_callback();
 }
 
+gboolean draw_histogram(GtkWidget *widget, cairo_t *cr, gpointer data) {
+	cairo_set_source_rgb(cr, 0, 0, 0);
+	cairo_rectangle(cr, 0, 0, 512, 150);
+	cairo_fill(cr);
+	cairo_set_line_width(cr, 1.0);
+	float histogram_max = 0;
+	float histogram_disp[512];
+	for (int i = 0; i < 512; i++) {
+		histogram_disp[i] = histogram[i];
+		if (histogram_max < histogram_disp[i]) histogram_max = histogram_disp[i];
+	}
+	if (histogram_max > imgsize_mem/4096) histogram_max = imgsize_mem/4096;
+	cairo_set_source_rgb(cr, 1, 1, 1);
+	for (int i = 0; i < 512; i++) {
+		cairo_move_to(cr, i, 150-(int)(histogram_disp[i]/histogram_max*150));
+		cairo_line_to(cr, i, 150);
+		cairo_stroke(cr);
+	}
+	return FALSE;
+}
+
 void activate(GtkApplication* app, gpointer user_data) {
 	window = gtk_application_window_new(app);
 	gtk_window_set_title(GTK_WINDOW(window), "FITS Viewer");
@@ -537,6 +560,15 @@ void activate(GtkApplication* app, gpointer user_data) {
 	gtk_grid_attach(GTK_GRID(container), combo_prev, 3, 0, 1, 1);
 
 
+	for(int i = 0; i < imgsize_mem; i++) {
+		histogram[pixels[i]/128]++;
+	}
+
+	histoprev = gtk_drawing_area_new();
+	gtk_widget_set_size_request(histoprev, 512, 170);
+	g_signal_connect(G_OBJECT(histoprev), "draw", G_CALLBACK(draw_histogram), NULL);
+	gtk_grid_attach(GTK_GRID(container), histoprev, 0, 1, 4, 1);
+
 	gtk_widget_show_all(window_options);
 }
 
@@ -573,7 +605,6 @@ int main(int argc, char *argv[]) {
 	stdev /= imgsize_mem;
 	stdev = sqrt(stdev);
 	range = stdev;
-	min = (int)avg - (int)(stdev);
 
 	makeimg();
 

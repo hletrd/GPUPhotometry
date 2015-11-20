@@ -8,6 +8,9 @@
 #else
 	#include "fitsio.h"
 #endif
+#ifndef M_PI
+    #define M_PI 3.141592653589793238462643383279
+#endif
 fitsfile *file;
 GtkWidget *window, *window_sub, *window_zoom, *window_options;
 GtkWidget *canvas, *eventbox;

@@ -17,18 +17,19 @@ GtkWidget *label1, *label2, *label_status, *label_diff;
 GtkWidget *label_adu, *label_sky, *button_sky, *buttonbox_sky, *button_reset, *buttonbox_reset, *label_stat, *label_mag;
 GtkWidget *scroll, *canvas_zoom;
 GdkPixbuf *pixbuf, *pixbuf_tmp, *pixbuf_full;
-GtkWidget *combo, *combo_prev;
-GtkWidget *label_zoom1, *label_zoom2;
+GtkWidget *combo, *combo_prev, *combo_ap;
+GtkWidget *label_zoom1, *label_zoom2, *label_ap;
 GtkListStore *liststore;
 GtkCellRenderer *column;
 GtkWidget *histoprev;
+GtkWidget *scalemin, *scalemax;
+GtkWidget *button_refresh, *buttonbox_refresh, *button_autoscale, *buttonbox_autoscale;
 int zoom_lastx, zoom_lasty;
 cairo_surface_t *surface;
 cairo_t *cr;
 int imgx, imgy;
 int imgsize_mem;
 int min, max;
-float range;
 float mag = 0.375;
 float prev_zoom = 2.0;
 int *pixels;
@@ -36,9 +37,11 @@ int mode = 0;
 long long int sum_sky = 0;
 int cnt_sky = 0;
 double avg = 0, stdev = 0;
+double avg_o, stdev_o;
 double mag1, mag2;
 int viewerx, viewery;
 int histogram[512];
+int scalemin_set, scalemax_set;
 
 int apsize = 5;
 
@@ -198,7 +201,24 @@ void makeimg() {
 	fclose(tmp);
 }
 
-void resize_callback() {
+void makeimg_preview() {
+	struct image bmp;
+	int pixelval;
+	newImage(&bmp, (int)(imgx), (int)(imgy));
+	for (int i = 0; i < imgy; i++) {
+		for (int j = 0; j < imgx; j++) {
+			pixelval = (double)((pixels[(int)(i*imgx+j)] - avg) / stdev * 256);
+			setPixelData(&bmp, j, (int)imgy-i, pixelval);		
+		}
+	}
+	unlink("tmp_full.bmp");
+	FILE *tmp = fopen("tmp_full.bmp", "w");
+	saveImage(bmp, tmp);
+	unloadImage(&bmp);
+	fclose(tmp);
+}
+
+void resize_callback(int always) {
 	static gint wx, wy, wx_new, wy_new;
 	static float prev_zoom_tmp;
 	gtk_window_get_size(GTK_WINDOW(window_zoom), &wx_new, &wy_new);
@@ -206,7 +226,7 @@ void resize_callback() {
 		wx = wx_new;
 		wy = wy_new;
 	}
-	if (wx_new != wx || wy_new != wy || prev_zoom_tmp != prev_zoom) {
+	if (wx_new != wx || wy_new != wy || prev_zoom_tmp != prev_zoom || always) {
 		surface = cairo_image_surface_create(CAIRO_FORMAT_RGB24, wx, wy);
 		cr = cairo_create(surface);
 		cairo_scale(cr, prev_zoom, prev_zoom);
@@ -336,10 +356,15 @@ void combosel_prev() {
 		prev_zoom = 8.0;
 		break;
 	}
-	resize_callback();
+	resize_callback(TRUE);
 }
 
-gboolean draw_histogram(GtkWidget *widget, cairo_t *cr, gpointer data) {
+void combosel_ap() {
+	apsize = gtk_combo_box_get_active(GTK_COMBO_BOX(combo_ap)) + 1;
+	resize_callback(TRUE);
+}
+
+void draw_histogram() {
 	cairo_set_source_rgb(cr, 0, 0, 0);
 	cairo_rectangle(cr, 0, 0, 512, 150);
 	cairo_fill(cr);
@@ -357,7 +382,42 @@ gboolean draw_histogram(GtkWidget *widget, cairo_t *cr, gpointer data) {
 		cairo_line_to(cr, i, 150);
 		cairo_stroke(cr);
 	}
-	return FALSE;
+}
+
+void scale() {
+	scalemin_set = gtk_range_get_value(GTK_RANGE(scalemin));
+	scalemax_set = gtk_range_get_value(GTK_RANGE(scalemax));
+	avg = scalemin_set;
+	stdev = scalemax_set - scalemin_set;
+	makeimg();
+	makeimg_preview();
+	g_object_unref(pixbuf);
+	GError **error = NULL;
+	pixbuf = gdk_pixbuf_new_from_file("tmp.bmp", error);
+	unlink("tmp.bmp");
+	gtk_image_set_from_pixbuf(GTK_IMAGE(canvas), pixbuf);
+	g_object_unref(pixbuf_full);
+	pixbuf_full = gdk_pixbuf_new_from_file("tmp_full.bmp", error);
+	unlink("tmp_full.bmp");
+	resize_callback(TRUE);
+}
+
+void scale_auto() {
+	avg = avg_o;
+	stdev = stdev_o;
+	gtk_range_set_value(GTK_RANGE(scalemin), avg);
+	gtk_range_set_value(GTK_RANGE(scalemax), avg+stdev);
+	makeimg();
+	makeimg_preview();
+	g_object_unref(pixbuf);
+	GError **error = NULL;
+	pixbuf = gdk_pixbuf_new_from_file("tmp.bmp", error);
+	unlink("tmp.bmp");
+	gtk_image_set_from_pixbuf(GTK_IMAGE(canvas), pixbuf);
+	g_object_unref(pixbuf_full);
+	pixbuf_full = gdk_pixbuf_new_from_file("tmp_full.bmp", error);
+	unlink("tmp_full.bmp");
+	resize_callback(TRUE);
 }
 
 void activate(GtkApplication* app, gpointer user_data) {
@@ -565,9 +625,72 @@ void activate(GtkApplication* app, gpointer user_data) {
 	}
 
 	histoprev = gtk_drawing_area_new();
-	gtk_widget_set_size_request(histoprev, 512, 170);
+	eventbox = gtk_event_box_new();
+	gtk_container_add(GTK_CONTAINER(eventbox), histoprev);
+	gtk_widget_set_size_request(eventbox, 512, 150);
+	gtk_widget_set_margin_start(eventbox, 47);
+	gtk_widget_set_margin_end(eventbox, 10);
 	g_signal_connect(G_OBJECT(histoprev), "draw", G_CALLBACK(draw_histogram), NULL);
-	gtk_grid_attach(GTK_GRID(container), histoprev, 0, 1, 4, 1);
+	gtk_grid_attach(GTK_GRID(container), eventbox, 0, 1, 4, 1);
+
+
+	scalemin = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 65535, 1);
+	gtk_widget_set_margin_top(scalemin, 0);
+	gtk_widget_set_size_request(scalemin, 565, 30);
+	gtk_scale_set_value_pos(GTK_SCALE(scalemin), GTK_POS_LEFT);
+	gtk_range_set_value(GTK_RANGE(scalemin), avg);
+	//g_signal_connect(scalemin, "value_changed", G_CALLBACK(scale), NULL);
+	gtk_grid_attach(GTK_GRID(container), scalemin, 0, 2, 4, 1);
+
+	scalemax = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 65535, 1);
+	gtk_widget_set_margin_top(scalemax, 0);
+	gtk_widget_set_size_request(scalemax, 565, 30);
+	gtk_scale_set_value_pos(GTK_SCALE(scalemax), GTK_POS_LEFT);
+	gtk_range_set_value(GTK_RANGE(scalemax), avg+stdev);
+	//g_signal_connect(scalemax, "value_changed", G_CALLBACK(scale), NULL);
+	gtk_grid_attach(GTK_GRID(container), scalemax, 0, 3, 4, 1);
+
+	buttonbox_refresh = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
+	gtk_widget_set_margin_top(buttonbox_refresh, 5);
+	gtk_widget_set_margin_bottom(buttonbox_refresh, 20);
+	//gtk_widget_set_size_request(buttonbox_refresh, 200, 20);
+	gtk_grid_attach(GTK_GRID(container), buttonbox_refresh, 0, 4, 2, 1);
+	button_refresh = gtk_button_new_with_label("Reload image by new scale");
+	g_signal_connect(button_refresh, "clicked", G_CALLBACK(scale), NULL);
+	gtk_container_add(GTK_CONTAINER(buttonbox_refresh), button_refresh);
+
+	buttonbox_autoscale = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
+	gtk_widget_set_margin_top(buttonbox_autoscale, 5);
+	gtk_widget_set_margin_bottom(buttonbox_autoscale, 20);
+	//gtk_widget_set_size_request(buttonbox_autoscale, 200, 20);
+	gtk_grid_attach(GTK_GRID(container), buttonbox_autoscale, 2, 4, 1, 1);
+	button_autoscale = gtk_button_new_with_label("Auto scale");
+	g_signal_connect(button_autoscale, "clicked", G_CALLBACK(scale_auto), NULL);
+	gtk_container_add(GTK_CONTAINER(buttonbox_autoscale), button_autoscale);
+
+	label_ap = gtk_label_new("Aperture radius");
+	gtk_widget_set_margin_top(label_ap, 0);
+	gtk_widget_set_margin_bottom(label_ap, 20);
+	gtk_widget_set_margin_start(label_ap, 40);
+	gtk_grid_attach(GTK_GRID(container), label_ap, 0, 5, 1, 1);
+	liststore = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_STRING);
+
+	char buf[10];
+	for(int i = 1; i <= 100; i++) {
+		sprintf(buf, "%d", i);
+		gtk_list_store_insert_with_values(liststore, NULL, -1, 0, buf, -1);
+	}
+
+	combo_ap = gtk_combo_box_new_with_model(GTK_TREE_MODEL(liststore));
+	gtk_widget_set_margin_top(combo_ap, 0);
+	gtk_widget_set_margin_bottom(combo_ap, 20);
+	gtk_widget_set_margin_start(combo_ap, 20);
+	column = gtk_cell_renderer_text_new();
+	gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(combo_ap), column, TRUE);
+	gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(combo_ap), column, "text", NULL);
+	gtk_combo_box_set_active(GTK_COMBO_BOX(combo_ap), 4);
+	g_signal_connect(combo_ap, "changed", G_CALLBACK(combosel_ap), NULL);
+	gtk_grid_attach(GTK_GRID(container), combo_ap, 1, 5, 1, 1);
 
 	gtk_widget_show_all(window_options);
 }
@@ -604,24 +727,12 @@ int main(int argc, char *argv[]) {
 	}
 	stdev /= imgsize_mem;
 	stdev = sqrt(stdev);
-	range = stdev;
+	avg_o = avg;
+	stdev_o = stdev;
 
 	makeimg();
 
-	struct image bmp;
-	int pixelval;
-	newImage(&bmp, (int)(imgx), (int)(imgy));
-	for (int i = 0; i < imgy; i++) {
-		for (int j = 0; j < imgx; j++) {
-			pixelval = (double)((pixels[(int)(i*imgx+j)] - avg) / stdev * 256);
-			setPixelData(&bmp, j, (int)imgy-i, pixelval);		
-		}
-	}
-	unlink("tmp_full.bmp");
-	FILE *tmp = fopen("tmp_full.bmp", "w");
-	saveImage(bmp, tmp);
-	unloadImage(&bmp);
-	fclose(tmp);
+	makeimg_preview();
 
 	zoom_lastx = imgx * mag / 2;
 	zoom_lasty = imgy * mag / 2;

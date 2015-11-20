@@ -382,7 +382,7 @@ void draw_histogram() {
 		histogram_disp[i] = histogram[i];
 		if (histogram_max < histogram_disp[i]) histogram_max = histogram_disp[i];
 	}
-	if (histogram_max > imgsize_mem/4096) histogram_max = imgsize_mem/4096;
+	//if (histogram_max > imgsize_mem/4096) histogram_max = imgsize_mem/4096;
 	cairo_set_source_rgb(cr, 1, 1, 1);
 	for (int i = 0; i < 512; i++) {
 		cairo_move_to(cr, i, 150-(int)(histogram_disp[i]/histogram_max*150));

@@ -9,13 +9,14 @@
 	#include "fitsio.h"
 #endif
 fitsfile *file;
-GtkWidget *window, *canvas, *eventbox;
+GtkWidget *window, *window_sub, *window_zoom;
+GtkWidget *canvas, *eventbox;
 GtkWidget *container;
 GtkWidget *button_box1, *button1, *button_box2, *button2;
 GtkWidget *label1, *label2, *label_status, *label_diff;
 GtkWidget *label_adu, *label_sky, *button_sky, *buttonbox_sky, *button_reset, *buttonbox_reset, *label_stat, *label_mag;
-GtkWidget *scroll;
-GdkPixbuf *pixbuf, *pixbuf2;
+GtkWidget *scroll, *canvas_zoom;
+GdkPixbuf *pixbuf, *pixbuf_tmp, *pixbuf_full;
 cairo_surface_t *surface;
 cairo_t *cr;
 int imgx, imgy;
@@ -128,11 +129,22 @@ gboolean mousemove_callback(GtkWidget *eventbox, GdkEventButton *event, gpointer
 		cairo_set_source_rgb(cr, 1, 1, 0);
 		cairo_arc(cr, x, y, apsize*mag, 0, 2*M_PI);
 		cairo_stroke(cr);
-		pixbuf2 = gdk_pixbuf_get_from_surface(surface, 0, 0, imgx*mag, imgy*mag);
-		gtk_image_set_from_pixbuf(GTK_IMAGE(canvas), pixbuf2);
+		pixbuf_tmp = gdk_pixbuf_get_from_surface(surface, 0, 0, imgx*mag, imgy*mag);
+		gtk_image_set_from_pixbuf(GTK_IMAGE(canvas), pixbuf_tmp);
 		cairo_surface_destroy(surface);
 		cairo_destroy(cr);
+		g_object_unref(pixbuf_tmp);
 	}
+	/*if (x >= 128*mag && y >= 128*mag && x <= imgx - 128*mag && y <= imgy - 128*mag) {
+		surface = cairo_image_surface_create(CAIRO_FORMAT_RGB24, 256, 256);
+		cr = cairo_create(surface);
+		gdk_cairo_set_source_pixbuf(cr, pixbuf_full, 0, 0);
+		cairo_paint(cr);
+		pixbuf_tmp = gdk_pixbuf_get_from_surface(surface, x/mag-128, y/mag-128, 256, 256);
+		gtk_image_set_from_pixbuf(GTK_IMAGE(canvas_zoom), pixbuf_tmp);
+		cairo_surface_destroy(surface);
+		cairo_destroy(cr);
+	}*/
 	gtk_label_set_text(GTK_LABEL(label_mag), s);
 	return 0;
 }
@@ -158,15 +170,12 @@ void getsize(GtkWidget *widget, GtkAllocation *allocation, void *data) {
 static void activate(GtkApplication* app, gpointer user_data) {
 	window = gtk_application_window_new(app);
 	gtk_window_set_title(GTK_WINDOW(window), "FITS Viewer");
-	gtk_window_set_default_size(GTK_WINDOW(window), 768, 900);
-	gtk_widget_show_all(window);
+	gtk_window_set_default_size(GTK_WINDOW(window), 768, 768);
 
-	//canvas = gtk_drawing_area_new();
-	//gtk_widget_set_size_request(canvas, (int)imgx*mag, (int)imgx*mag);
-	//g_signal_connect(G_OBJECT(canvas), "draw", G_CALLBACK(draw_callback), NULL);
 	canvas = gtk_image_new();
 	GError **error = NULL;
 	pixbuf = gdk_pixbuf_new_from_file("tmp.bmp", error);
+	unlink("tmp.bmp");
 	gtk_image_set_from_pixbuf(GTK_IMAGE(canvas), pixbuf);
 
 	eventbox = gtk_event_box_new();
@@ -182,21 +191,41 @@ static void activate(GtkApplication* app, gpointer user_data) {
 	gtk_widget_set_size_request(scroll, 768, 768);
 	gtk_container_add(GTK_CONTAINER(scroll), eventbox);
 
+	gtk_container_add(GTK_CONTAINER(window), scroll);
+	gtk_widget_show_all(window);
+
+
+	window_zoom = gtk_application_window_new(app);
+	gtk_window_set_title(GTK_WINDOW(window_zoom), "Preview");
+	gtk_window_set_default_size(GTK_WINDOW(window_zoom), 256, 256);
+	pixbuf_full = gdk_pixbuf_new_from_file("tmp_full.bmp", error);
+	unlink("tmp_full.bmp");
+	canvas_zoom = gtk_image_new();
+	gtk_widget_set_size_request(canvas_zoom, 256, 256);
+	gtk_container_add(GTK_CONTAINER(window_zoom), canvas_zoom);
+	gtk_widget_show_all(window_zoom);
+
+
+
+	window_sub = gtk_application_window_new(app);
+	gtk_window_set_title(GTK_WINDOW(window_sub), "Informations");
+	gtk_window_set_default_size(GTK_WINDOW(window_sub), 430, 200);
 
 	container = gtk_grid_new();
-	gtk_container_add(GTK_CONTAINER(window), container);
-
+	gtk_container_add(GTK_CONTAINER(window_sub), container);
+	gtk_widget_set_margin_start(container, 20);
+	gtk_widget_set_margin_end(container, 20);
 
 	button_box1 = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
 	gtk_widget_set_margin_top(button_box1, 10);
-	gtk_grid_attach(GTK_GRID(container), button_box1, 0, 1, 2, 1);
+	gtk_grid_attach(GTK_GRID(container), button_box1, 0, 0, 2, 1);
 	button1 = gtk_button_new_with_label("Pick reference star");
 	g_signal_connect(button1, "clicked", G_CALLBACK(click1), NULL);
 	gtk_container_add(GTK_CONTAINER(button_box1), button1);
 	
 	button_box2 = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
 	gtk_widget_set_margin_top(button_box2, 10);
-	gtk_grid_attach(GTK_GRID(container), button_box2, 2, 1, 2, 1);
+	gtk_grid_attach(GTK_GRID(container), button_box2, 2, 0, 2, 1);
 	button2 = gtk_button_new_with_label("Pick target star");
 	g_signal_connect(button2, "clicked", G_CALLBACK(click2), NULL);
 	gtk_container_add(GTK_CONTAINER(button_box2), button2);
@@ -204,46 +233,47 @@ static void activate(GtkApplication* app, gpointer user_data) {
 
 	label1 = gtk_label_new("Reference: 0.000000");
 	gtk_widget_set_margin_top(label1, 10);
-	gtk_grid_attach(GTK_GRID(container), label1, 0, 2, 1, 1);
+	gtk_grid_attach(GTK_GRID(container), label1, 0, 1, 1, 1);
 
 	label2 = gtk_label_new("Target: 0.000000");
 	gtk_widget_set_margin_top(label2, 10);
-	gtk_grid_attach(GTK_GRID(container), label2, 1, 2, 1, 1);
+	gtk_grid_attach(GTK_GRID(container), label2, 1, 1, 1, 1);
 
 	label_diff = gtk_label_new("Difference: 0.000000");
 	gtk_widget_set_margin_top(label_diff, 10);
-	gtk_grid_attach(GTK_GRID(container), label_diff, 2, 2, 1, 1);
+	gtk_grid_attach(GTK_GRID(container), label_diff, 2, 1, 1, 1);
 
 
 	label_adu = gtk_label_new("ADU at cursor: 0");
 	gtk_widget_set_margin_top(label_adu, 15);
-	gtk_grid_attach(GTK_GRID(container), label_adu, 0, 3, 2, 1);
+	gtk_grid_attach(GTK_GRID(container), label_adu, 0, 2, 2, 1);
 	label_mag = gtk_label_new("Mag at cursor: 0.000000");
 	gtk_widget_set_margin_top(label_mag, 15);
-	gtk_grid_attach(GTK_GRID(container), label_mag, 2, 3, 2, 1);
+	gtk_grid_attach(GTK_GRID(container), label_mag, 2, 2, 2, 1);
 	
 	char s[100];
 	sprintf(s, "Image statistics: Average %.2lf, STDEV %.2lf", avg, stdev);
 	label_stat = gtk_label_new(s);
 	gtk_widget_set_margin_top(label_stat, 15);
-	gtk_grid_attach(GTK_GRID(container), label_stat, 0, 4, 4, 1);
-	
-	
+	gtk_grid_attach(GTK_GRID(container), label_stat, 0, 3, 4, 1);
+
 
 	buttonbox_sky = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
 	gtk_widget_set_margin_top(buttonbox_sky, 20);
-	gtk_grid_attach(GTK_GRID(container), buttonbox_sky, 0, 5, 1, 1);
+	gtk_grid_attach(GTK_GRID(container), buttonbox_sky, 0, 4, 1, 1);
 	button_sky = gtk_button_new_with_label("Pick sky value");
 	g_signal_connect(button_sky, "clicked", G_CALLBACK(sky_pick), NULL);
 	gtk_container_add(GTK_CONTAINER(buttonbox_sky), button_sky);
 
 	label_sky = gtk_label_new("Sky value: 0.000000");
 	gtk_widget_set_margin_top(label_sky, 20);
-	gtk_grid_attach(GTK_GRID(container), label_sky, 1, 5, 1, 1);
+	gtk_widget_set_margin_start(label_sky, 20);
+	gtk_widget_set_margin_end(label_sky, 20);
+	gtk_grid_attach(GTK_GRID(container), label_sky, 1, 4, 1, 1);
 
 	buttonbox_reset = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
 	gtk_widget_set_margin_top(buttonbox_reset, 20);
-	gtk_grid_attach(GTK_GRID(container), buttonbox_reset, 2, 5, 1, 1);
+	gtk_grid_attach(GTK_GRID(container), buttonbox_reset, 2, 4, 1, 1);
 	button_reset = gtk_button_new_with_label("Reset sky value");
 	g_signal_connect(button_reset, "clicked", G_CALLBACK(sky_reset), NULL);
 	gtk_container_add(GTK_CONTAINER(buttonbox_reset), button_reset);
@@ -252,11 +282,9 @@ static void activate(GtkApplication* app, gpointer user_data) {
 	label_status = gtk_label_new("Select mode");
 	gtk_widget_set_margin_top(label_status, 10);
 	gtk_widget_set_margin_bottom(label_status, 10);
-	gtk_grid_attach(GTK_GRID(container), label_status, 0, 6, 4, 1);
+	gtk_grid_attach(GTK_GRID(container), label_status, 0, 5, 4, 1);
 
-
-	gtk_grid_attach(GTK_GRID(container), scroll, 0, 0, 4, 1);
-	gtk_widget_show_all(window);
+	gtk_widget_show_all(window_sub);
 }
 
 int main(int argc, char *argv[]) {
@@ -311,6 +339,20 @@ int main(int argc, char *argv[]) {
 	FILE *tmp = fopen("tmp.bmp", "w");
 	saveImage(bmp, tmp);
 	unloadImage(&bmp);
+	fclose(tmp);
+
+	newImage(&bmp, (int)(imgx), (int)(imgy));
+	for (int i = 0; i < imgy; i++) {
+		for (int j = 0; j < imgx; j++) {
+			pixelval = (double)((pixels[(int)(i*imgx+j)] - min) / range / 3 * 256);
+			setPixelData(&bmp, j, (int)imgy-i, pixelval);		
+		}
+	}
+	unlink("tmp_full.bmp");
+	tmp = fopen("tmp_full.bmp", "w");
+	saveImage(bmp, tmp);
+	unloadImage(&bmp);
+	fclose(tmp);
 
 	app = gtk_application_new("com.hletrd.viewer", G_APPLICATION_FLAGS_NONE);
 	g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);

@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <unistd.h>
+#include <string.h>
 #include "image.h"
 #ifdef __APPLE__
 	#include "/usr/local/Cellar/cfitsio/3.370/include/fitsio.h"
@@ -11,12 +12,15 @@
 #ifndef M_PI
     #define M_PI 3.141592653589793238462643383279
 #endif
-#ifndef gtk_widget_set_margin_start
-	#define gtk_widget_set_margin_start(a, b) gtk_widget_set_margin_left(a, b)
-	#define gtk_widget_set_margin_end(a, b) gtk_widget_set_margin_right(a, b)
+#if GTK_MINOR_VERSION > 11
+	#define gtk_widget_set_margin_start_my(a, b) gtk_widget_set_margin_start(a,b)
+	#define gtk_widget_set_margin_end_my(a, b) gtk_widget_set_margin_end(a,b)
+#else
+	#define gtk_widget_set_margin_start_my(a, b) gtk_widget_set_margin_left(a,b)
+	#define gtk_widget_set_margin_end_my(a, b) gtk_widget_set_margin_right(a,b)
 #endif
 fitsfile *file;
-GtkWidget *window, *window_sub, *window_zoom, *window_options;
+GtkWidget *window, *window_sub, *window_zoom, *window_options, *window_header;
 GtkWidget *canvas, *eventbox;
 GtkWidget *container;
 GtkWidget *button_box1, *button1, *button_box2, *button2;
@@ -31,6 +35,9 @@ GtkCellRenderer *column;
 GtkWidget *histoprev;
 GtkWidget *scalemin, *scalemax;
 GtkWidget *button_refresh, *buttonbox_refresh, *button_autoscale, *buttonbox_autoscale;
+GtkWidget *text_header;
+GtkWidget *eventbox_header;
+GtkTextBuffer *textbuf_header;
 int zoom_lastx, zoom_lasty;
 cairo_surface_t *surface;
 cairo_t *cr;
@@ -49,6 +56,7 @@ double mag1, mag2;
 int viewerx, viewery;
 int histogram[512];
 int scalemin_set, scalemax_set;
+char headers[65536];
 
 int apsize = 5;
 
@@ -476,8 +484,8 @@ void activate(GtkApplication* app, gpointer user_data) {
 
 	container = gtk_grid_new();
 	gtk_container_add(GTK_CONTAINER(window_sub), container);
-	gtk_widget_set_margin_start(container, 20);
-	gtk_widget_set_margin_end(container, 30);
+	gtk_widget_set_margin_start_my(container, 20);
+	gtk_widget_set_margin_end_my(container, 30);
 
 	button_box1 = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
 	gtk_widget_set_margin_top(button_box1, 10);
@@ -530,8 +538,8 @@ void activate(GtkApplication* app, gpointer user_data) {
 
 	label_sky = gtk_label_new("Sky value: 0.000000");
 	gtk_widget_set_margin_top(label_sky, 20);
-	gtk_widget_set_margin_start(label_sky, 20);
-	gtk_widget_set_margin_end(label_sky, 20);
+	gtk_widget_set_margin_start_my(label_sky, 20);
+	gtk_widget_set_margin_end_my(label_sky, 20);
 	gtk_grid_attach(GTK_GRID(container), label_sky, 1, 4, 1, 1);
 
 	buttonbox_reset = gtk_button_box_new(GTK_ORIENTATION_HORIZONTAL);
@@ -561,8 +569,8 @@ void activate(GtkApplication* app, gpointer user_data) {
 
 	container = gtk_grid_new();
 	gtk_container_add(GTK_CONTAINER(window_options), container);
-	gtk_widget_set_margin_start(container, 20);
-	gtk_widget_set_margin_end(container, 30);
+	gtk_widget_set_margin_start_my(container, 20);
+	gtk_widget_set_margin_end_my(container, 30);
 
 	label_zoom1 = gtk_label_new("Image zoom");
 	gtk_widget_set_margin_top(label_zoom1, 20);
@@ -582,7 +590,7 @@ void activate(GtkApplication* app, gpointer user_data) {
 	combo = gtk_combo_box_new_with_model(GTK_TREE_MODEL(liststore));
 	gtk_widget_set_margin_top(combo, 20);
 	gtk_widget_set_margin_bottom(combo, 20);
-	gtk_widget_set_margin_start(combo, 20);
+	gtk_widget_set_margin_start_my(combo, 20);
 	column = gtk_cell_renderer_text_new();
 	gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(combo), column, TRUE);
 	gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(combo), column, "text", NULL);
@@ -594,7 +602,7 @@ void activate(GtkApplication* app, gpointer user_data) {
 	label_zoom2 = gtk_label_new("Preview zoom");
 	gtk_widget_set_margin_top(label_zoom2, 20);
 	gtk_widget_set_margin_bottom(label_zoom2, 20);
-	gtk_widget_set_margin_start(label_zoom2, 20);
+	gtk_widget_set_margin_start_my(label_zoom2, 20);
 	gtk_grid_attach(GTK_GRID(container), label_zoom2, 2, 0, 1, 1);
 	liststore = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_STRING);
 	gtk_list_store_insert_with_values(liststore, NULL, -1, 0, "50%", -1);
@@ -618,7 +626,7 @@ void activate(GtkApplication* app, gpointer user_data) {
 	combo_prev = gtk_combo_box_new_with_model(GTK_TREE_MODEL(liststore));
 	gtk_widget_set_margin_top(combo_prev, 20);
 	gtk_widget_set_margin_bottom(combo_prev, 20);
-	gtk_widget_set_margin_start(combo_prev, 20);
+	gtk_widget_set_margin_start_my(combo_prev, 20);
 	column = gtk_cell_renderer_text_new();
 	gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(combo_prev), column, TRUE);
 	gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(combo_prev), column, "text", NULL);
@@ -635,8 +643,8 @@ void activate(GtkApplication* app, gpointer user_data) {
 	eventbox = gtk_event_box_new();
 	gtk_container_add(GTK_CONTAINER(eventbox), histoprev);
 	gtk_widget_set_size_request(eventbox, 512, 150);
-	gtk_widget_set_margin_start(eventbox, 47);
-	gtk_widget_set_margin_end(eventbox, 10);
+	gtk_widget_set_margin_start_my(eventbox, 47);
+	gtk_widget_set_margin_end_my(eventbox, 10);
 	g_signal_connect(G_OBJECT(histoprev), "draw", G_CALLBACK(draw_histogram), NULL);
 	gtk_grid_attach(GTK_GRID(container), eventbox, 0, 1, 4, 1);
 
@@ -678,7 +686,7 @@ void activate(GtkApplication* app, gpointer user_data) {
 	label_ap = gtk_label_new("Aperture radius");
 	gtk_widget_set_margin_top(label_ap, 0);
 	gtk_widget_set_margin_bottom(label_ap, 20);
-	gtk_widget_set_margin_start(label_ap, 40);
+	gtk_widget_set_margin_start_my(label_ap, 40);
 	gtk_grid_attach(GTK_GRID(container), label_ap, 0, 5, 1, 1);
 	liststore = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_STRING);
 
@@ -691,7 +699,7 @@ void activate(GtkApplication* app, gpointer user_data) {
 	combo_ap = gtk_combo_box_new_with_model(GTK_TREE_MODEL(liststore));
 	gtk_widget_set_margin_top(combo_ap, 0);
 	gtk_widget_set_margin_bottom(combo_ap, 20);
-	gtk_widget_set_margin_start(combo_ap, 20);
+	gtk_widget_set_margin_start_my(combo_ap, 20);
 	column = gtk_cell_renderer_text_new();
 	gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(combo_ap), column, TRUE);
 	gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(combo_ap), column, "text", NULL);
@@ -700,6 +708,26 @@ void activate(GtkApplication* app, gpointer user_data) {
 	gtk_grid_attach(GTK_GRID(container), combo_ap, 1, 5, 1, 1);
 
 	gtk_widget_show_all(window_options);
+
+
+
+	window_header = gtk_application_window_new(app);
+	gtk_window_set_title(GTK_WINDOW(window_header), "FITS Headers");
+	gtk_window_set_default_size(GTK_WINDOW(window_header), 300, 600);
+
+	text_header = gtk_text_view_new();
+	textbuf_header = gtk_text_buffer_new(NULL);
+	gtk_text_buffer_set_text(textbuf_header, headers, -1);
+	gtk_text_buffer_set_modified(textbuf_header, FALSE);
+	text_header = gtk_text_view_new_with_buffer(textbuf_header);
+	gtk_text_view_set_editable(GTK_TEXT_VIEW(text_header), FALSE);
+	gtk_widget_set_sensitive(text_header, FALSE);
+
+	eventbox_header = gtk_event_box_new();
+	gtk_container_add(GTK_CONTAINER(eventbox_header), text_header);
+	gtk_container_add(GTK_CONTAINER(window_header), eventbox_header);
+	gtk_widget_show_all(window_header);
+
 }
 
 int main(int argc, char *argv[]) {
@@ -720,10 +748,27 @@ int main(int argc, char *argv[]) {
 	imgy = (int)imgsize[1];
 	imgsize_mem = imgx * imgy;
 
+	char card[FLEN_CARD];
+	int single = 0, hdupos, nkeys;
+	fits_get_hdu_num(file, &hdupos);
+	if (hdupos != 1 || strchr(argv[1], '[')) single = 1;
+	for (; !status; hdupos++) {
+		fits_get_hdrspace(file, &nkeys, NULL, &status);
+		for (int i = 1; i <= nkeys; i++) {
+			if (fits_read_record(file, i, card, &status)) break;
+			sprintf(headers+strlen(headers), "%s\n", card);
+		}
+		if (single) break;
+		fits_movrel_hdu(file, 1, NULL, &status); 
+	}
+	if (status == END_OF_FILE) status = 0;
+
 	long pixeli[2] = {1, 1};
 	pixels = (int*)malloc(imgsize_mem*sizeof(int));
 	fits_read_pix(file, TINT, pixeli, imgsize_mem, NULL, pixels, NULL, &status);
 	if(status) fprintf(stderr, "Image reading error\n");
+
+	fits_close_file(file, &status);
 
 	for (int i = 0; i < imgsize_mem; i++) {
 		avg += (double)pixels[i];

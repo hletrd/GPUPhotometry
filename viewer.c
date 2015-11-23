@@ -20,12 +20,12 @@
 	#define gtk_widget_set_margin_end_my(a, b) gtk_widget_set_margin_right(a,b)
 #endif
 fitsfile *file;
-GtkWidget *window, *window_sub, *window_zoom, *window_options, *window_header;
+GtkWidget *window, *window_sub, *window_zoom, *window_options, *window_header, *window_profile;
 GtkWidget *canvas, *eventbox;
 GtkWidget *container;
 GtkWidget *button_box1, *button1, *button_box2, *button2;
 GtkWidget *label1, *label2, *label_status, *label_diff;
-GtkWidget *label_adu, *label_sky, *button_sky, *buttonbox_sky, *button_reset, *buttonbox_reset, *label_stat, *label_mag;
+GtkWidget *label_adu, *label_adu_max, *label_sky, *button_sky, *buttonbox_sky, *button_reset, *buttonbox_reset, *label_stat, *label_mag, *label_mag_max;
 GtkWidget *scroll, *canvas_zoom;
 GdkPixbuf *pixbuf, *pixbuf_tmp, *pixbuf_full;
 GtkWidget *combo, *combo_prev, *combo_ap;
@@ -37,6 +37,8 @@ GtkWidget *scalemin, *scalemax;
 GtkWidget *button_refresh, *buttonbox_refresh, *button_autoscale, *buttonbox_autoscale;
 GtkWidget *text_header;
 GtkWidget *eventbox_header;
+GtkWidget *draw_profiles;
+GtkWidget *label_color, *combo_color;
 GtkTextBuffer *textbuf_header;
 int zoom_lastx, zoom_lasty;
 cairo_surface_t *surface;
@@ -57,6 +59,7 @@ int viewerx, viewery;
 int histogram[512];
 int scalemin_set, scalemax_set;
 char headers[65536];
+int profiles[256];
 
 int apsize = 5;
 
@@ -146,12 +149,12 @@ gboolean mousemove_callback(GtkWidget *eventbox, GdkEventButton *event, gpointer
 		}
 		pixval /= pixcnt;
 		char s[100];
-		sprintf(s, "ADU at cursor: %d", pixval);
+		sprintf(s, "ADU(point): %d", pixval);
 		gtk_label_set_text(GTK_LABEL(label_adu), s);
 		if (cnt_sky) {
-			sprintf(s, "Mag at cursor: %lf", -2.5 * log10(pixval - (double)sum_sky / cnt_sky));
+			sprintf(s, "Mag(point): %lf", -2.5 * log10(pixval - (double)sum_sky / cnt_sky));
 		} else {
-			sprintf(s, "Mag at cursor: %lf", -2.5 * log10(pixval));
+			sprintf(s, "Mag(point): %lf", -2.5 * log10(pixval));
 		}
 		gtk_label_set_text(GTK_LABEL(label_mag), s);
 
@@ -186,6 +189,121 @@ gboolean mousemove_callback(GtkWidget *eventbox, GdkEventButton *event, gpointer
 		g_object_unref(pixbuf_tmp);
 		zoom_lastx = x;
 		zoom_lasty = y;
+
+		surface = cairo_image_surface_create(CAIRO_FORMAT_RGB24, 512, 150);
+		cr = cairo_create(surface);
+		int pos;
+		float max;
+		float peak = 0.1;
+		int peakx, peaky;
+		for (int i = -apsize; i <= apsize; i++) {
+			for (int j = -((int)sqrt(apsize * apsize - i * i)); j*j + i*i <= apsize*apsize; j++) {
+				if ((int)((x+i)/mag + (y+j)*imgx/mag) >= 0 && (int)((x+i)/mag + (y+j)*imgx/mag) < imgx*imgy) {
+					if (pixels[(int)((x+i)/mag + (y+j)*imgx/mag)] > peak) {
+						peak = pixels[(int)((x+i)/mag + (y+j)*imgx/mag)];
+						peakx = x+i;
+						peaky = y+j;
+					}
+				}
+			}
+		}
+		//x = peakx;
+		//y = peaky;
+
+		sprintf(s, "ADU(max): %d", (int)peak);
+		gtk_label_set_text(GTK_LABEL(label_adu_max), s);
+		if (cnt_sky) {
+			sprintf(s, "Magnitude(max): %lf", -2.5 * log10(peak - (double)sum_sky / cnt_sky));
+		} else {
+			sprintf(s, "Magnitude(max): %lf", -2.5 * log10(peak));
+		}
+		gtk_label_set_text(GTK_LABEL(label_mag_max), s);
+
+		cairo_set_source_rgb(cr, 0, 0, 0);
+		cairo_rectangle(cr, 0, 0, 512, 150);
+		cairo_paint(cr);
+		cairo_set_line_width(cr, 1.0);
+		cairo_set_source_rgb(cr, 1, 0.3, 0.3);
+		cairo_move_to(cr, 0, 150);
+		max = 0.1;
+		for(int i = -32; i <= 32; i++) {
+			pos = (int)(y/mag*imgx + x/mag + i);
+			if (pos >= 0 && pos < imgsize_mem) {
+				if (pixels[pos] > max) max = pixels[pos];
+			}
+		}
+		for(int i = -32; i <= 32; i++) {
+			pos = (int)(y/mag*imgx + x/mag + i);
+			if (pos >= 0 && pos < imgsize_mem) {
+				cairo_line_to(cr, (i+32)*8, 150-pixels[pos]/max*140);
+			} else {
+				cairo_line_to(cr, (i+32)*8, 150);
+			}
+		}
+		cairo_line_to(cr, 512, 150);
+		cairo_stroke(cr);
+		cairo_set_source_rgb(cr, 0.3, 1, 0.3);
+		cairo_move_to(cr, 0, 150);
+		max = 0.1;
+		for(int i = -32; i <= 32; i++) {
+			pos = (int)(y/mag*imgx + x/mag + i*imgx);
+			if (pos >= 0 && pos < imgsize_mem) {
+				if (pixels[pos] > max) max = pixels[pos];
+			}
+		}
+		for(int i = -32; i <= 32; i++) {
+			pos = (int)(y/mag*imgx + x/mag + i*imgx);
+			if (pos >= 0 && pos < imgsize_mem) {
+				cairo_line_to(cr, (i+32)*8, 150-pixels[pos]/max*140);
+			} else {
+				cairo_line_to(cr, (i+32)*8, 150);
+			}
+		}
+		cairo_line_to(cr, 512, 150);
+		cairo_stroke(cr);
+		cairo_set_source_rgb(cr, 1, 1, 0);
+		cairo_move_to(cr, 0, 150);
+		max = 0.1;
+		for(int i = -32; i <= 32; i++) {
+			pos = (int)(y/mag*imgx + x/mag + i*imgx + i);
+			if (pos >= 0 && pos < imgsize_mem) {
+				if (pixels[pos] > max) max = pixels[pos];
+			}
+		}
+		for(int i = -32; i <= 32; i++) {
+			pos = (int)(y/mag*imgx + x/mag + i*imgx + i);
+			if (pos >= 0 && pos < imgsize_mem) {
+				cairo_line_to(cr, (i+32)*8, 150-pixels[pos]/max*140);
+			} else {
+				cairo_line_to(cr, (i+32)*8, 150);
+			}
+		}
+		cairo_line_to(cr, 512, 150);
+		cairo_stroke(cr);
+		cairo_set_source_rgb(cr, 0, 1, 1);
+		cairo_move_to(cr, 0, 150);
+		max = 0.1;
+		for(int i = -32; i <= 32; i++) {
+			pos = (int)(y/mag*imgx + x/mag - i*imgx + i);
+			if (pos >= 0 && pos < imgsize_mem) {
+				if (pixels[pos] > max) max = pixels[pos];
+			}
+		}
+		for(int i = -32; i <= 32; i++) {
+			pos = (int)(y/mag*imgx + x/mag - i*imgx + i);
+			if (pos >= 0 && pos < imgsize_mem) {
+				cairo_line_to(cr, (i+32)*8, 150-pixels[pos]/max*140);
+			} else {
+				cairo_line_to(cr, (i+32)*8, 150);
+			}
+		}
+		cairo_line_to(cr, 512, 150);
+		cairo_stroke(cr);
+		pixbuf_tmp = gdk_pixbuf_get_from_surface(surface, 0, 0, 512, 150);
+		gtk_image_set_from_pixbuf(GTK_IMAGE(draw_profiles), pixbuf_tmp);
+		cairo_surface_destroy(surface);
+		cairo_destroy(cr);
+		g_object_unref(pixbuf_tmp);
 	}
 	return 0;
 }
@@ -216,6 +334,32 @@ void makeimg() {
 	fclose(tmp);
 }
 
+void makeimg_rainbow() {
+	struct image bmp;
+	int pixelval;
+	newImage(&bmp, (int)(imgx * mag), (int)(imgy * mag));
+	if (mag == 1.0) {
+		for (int i = 0; i < imgy; i++) {
+			for (int j = 0; j < imgx; j++) {
+				pixelval = ((pixels[i*imgx+j] - avg) / stdev * 256);
+				setPixelData(&bmp, j, (int)imgy-i, pixelval);		
+			}
+		}
+	} else {
+		for (int i = 0; i < imgy * mag; i++) {
+			for (int j = 0; j < imgx * mag; j++) {
+				pixelval = (double)((pixels[((int)(i/mag)*imgx)+(int)(j/mag)] - avg) / stdev * 256);
+				setPixelData(&bmp, j, (int)imgy*mag-i, pixelval);		
+			}
+		}
+	}
+	unlink("tmp.bmp");
+	FILE *tmp = fopen("tmp.bmp", "w");
+	saveImage_rainbow(bmp, tmp);
+	unloadImage(&bmp);
+	fclose(tmp);
+}
+
 void makeimg_preview() {
 	struct image bmp;
 	int pixelval;
@@ -229,6 +373,23 @@ void makeimg_preview() {
 	unlink("tmp_full.bmp");
 	FILE *tmp = fopen("tmp_full.bmp", "w");
 	saveImage(bmp, tmp);
+	unloadImage(&bmp);
+	fclose(tmp);
+}
+
+void makeimg_preview_rainbow() {
+	struct image bmp;
+	int pixelval;
+	newImage(&bmp, (int)(imgx), (int)(imgy));
+	for (int i = 0; i < imgy; i++) {
+		for (int j = 0; j < imgx; j++) {
+			pixelval = (double)((pixels[(int)(i*imgx+j)] - avg) / stdev * 256);
+			setPixelData(&bmp, j, (int)imgy-i, pixelval);		
+		}
+	}
+	unlink("tmp_full.bmp");
+	FILE *tmp = fopen("tmp_full.bmp", "w");
+	saveImage_rainbow(bmp, tmp);
 	unloadImage(&bmp);
 	fclose(tmp);
 }
@@ -312,7 +473,11 @@ void combosel() {
 		mag = 1.0;
 		break;
 	}
-	makeimg();
+	if (gtk_combo_box_get_active(GTK_COMBO_BOX(combo_color)) == 0) {
+		makeimg();
+	} else if (gtk_combo_box_get_active(GTK_COMBO_BOX(combo_color)) == 1) {
+		makeimg_rainbow();
+	}
 	g_object_unref(pixbuf);
 	GError **error = NULL;
 	pixbuf = gdk_pixbuf_new_from_file("tmp.bmp", error);
@@ -321,6 +486,7 @@ void combosel() {
 }
 
 void combosel_prev() {
+	GError **error = NULL;
 	switch (gtk_combo_box_get_active(GTK_COMBO_BOX(combo_prev))) {
 		case 0:
 		prev_zoom = 0.5;
@@ -371,6 +537,14 @@ void combosel_prev() {
 		prev_zoom = 8.0;
 		break;
 	}
+	if (gtk_combo_box_get_active(GTK_COMBO_BOX(combo_color)) == 0) {
+		makeimg_preview();
+	} else if (gtk_combo_box_get_active(GTK_COMBO_BOX(combo_color)) == 1) {
+		makeimg_preview_rainbow();
+	}
+	g_object_unref(pixbuf_full);
+	pixbuf_full = gdk_pixbuf_new_from_file("tmp_full.bmp", error);
+	unlink("tmp_full.bmp");
 	resize_callback(TRUE);
 }
 
@@ -379,7 +553,37 @@ void combosel_ap() {
 	resize_callback(TRUE);
 }
 
-void draw_histogram() {
+void combosel_color() {
+	GError **error = NULL;
+	switch (gtk_combo_box_get_active(GTK_COMBO_BOX(combo_color))) {
+		case 0:
+		makeimg();
+		g_object_unref(pixbuf);
+		pixbuf = gdk_pixbuf_new_from_file("tmp.bmp", error);
+		unlink("tmp.bmp");
+		gtk_image_set_from_pixbuf(GTK_IMAGE(canvas), pixbuf);
+		makeimg_preview();
+		g_object_unref(pixbuf_full);
+		pixbuf_full = gdk_pixbuf_new_from_file("tmp_full.bmp", error);
+		unlink("tmp_full.bmp");
+		resize_callback(TRUE);
+		break;
+		case 1:
+		makeimg_rainbow();
+		g_object_unref(pixbuf);
+		pixbuf = gdk_pixbuf_new_from_file("tmp.bmp", error);
+		unlink("tmp.bmp");
+		gtk_image_set_from_pixbuf(GTK_IMAGE(canvas), pixbuf);
+		makeimg_preview_rainbow();
+		g_object_unref(pixbuf_full);
+		pixbuf_full = gdk_pixbuf_new_from_file("tmp_full.bmp", error);
+		unlink("tmp_full.bmp");
+		resize_callback(TRUE);
+		break;
+	}
+}
+
+void draw_histogram(GtkWidget *widget, cairo_t *cr, gpointer data) {
 	cairo_set_source_rgb(cr, 0, 0, 0);
 	cairo_rectangle(cr, 0, 0, 512, 150);
 	cairo_fill(cr);
@@ -399,13 +603,24 @@ void draw_histogram() {
 	}
 }
 
+void draw_profiles_func(GtkWidget *widget, cairo_t *cr, gpointer data) {
+	cairo_set_source_rgb(cr, 0, 0, 0);
+	cairo_rectangle(cr, 0, 0, 512, 150);
+	cairo_fill(cr);
+}
+
 void scale() {
 	scalemin_set = gtk_range_get_value(GTK_RANGE(scalemin));
 	scalemax_set = gtk_range_get_value(GTK_RANGE(scalemax));
 	avg = scalemin_set;
 	stdev = scalemax_set - scalemin_set;
-	makeimg();
-	makeimg_preview();
+	if (gtk_combo_box_get_active(GTK_COMBO_BOX(combo_color)) == 0) {
+		makeimg();
+		makeimg_preview();
+	} else if (gtk_combo_box_get_active(GTK_COMBO_BOX(combo_color)) == 1) {
+		makeimg_rainbow();
+		makeimg_preview_rainbow();
+	}
 	g_object_unref(pixbuf);
 	GError **error = NULL;
 	pixbuf = gdk_pixbuf_new_from_file("tmp.bmp", error);
@@ -422,8 +637,13 @@ void scale_auto() {
 	stdev = stdev_o;
 	gtk_range_set_value(GTK_RANGE(scalemin), avg);
 	gtk_range_set_value(GTK_RANGE(scalemax), avg+stdev);
-	makeimg();
-	makeimg_preview();
+	if (gtk_combo_box_get_active(GTK_COMBO_BOX(combo_color)) == 0) {
+		makeimg();
+		makeimg_preview();
+	} else if (gtk_combo_box_get_active(GTK_COMBO_BOX(combo_color)) == 1) {
+		makeimg_rainbow();
+		makeimg_preview_rainbow();
+	}
 	g_object_unref(pixbuf);
 	GError **error = NULL;
 	pixbuf = gdk_pixbuf_new_from_file("tmp.bmp", error);
@@ -515,12 +735,22 @@ void activate(GtkApplication* app, gpointer user_data) {
 	gtk_grid_attach(GTK_GRID(container), label_diff, 2, 1, 1, 1);
 
 
-	label_adu = gtk_label_new("ADU at cursor: 0");
+	label_adu = gtk_label_new("ADU(point): 0");
+	gtk_widget_set_margin_start_my(label_adu, 20);
 	gtk_widget_set_margin_top(label_adu, 15);
-	gtk_grid_attach(GTK_GRID(container), label_adu, 0, 2, 2, 1);
-	label_mag = gtk_label_new("Mag at cursor: 0.000000");
+	gtk_grid_attach(GTK_GRID(container), label_adu, 0, 2, 1, 1);
+	label_adu_max = gtk_label_new("ADU(max): 0");
+	gtk_widget_set_margin_start_my(label_adu_max, 20);
+	gtk_widget_set_margin_top(label_adu_max, 15);
+	gtk_grid_attach(GTK_GRID(container), label_adu_max, 1, 2, 1, 1);
+	label_mag = gtk_label_new("Magnitude(point): 0.000000");
+	gtk_widget_set_margin_start_my(label_mag, 20);
 	gtk_widget_set_margin_top(label_mag, 15);
-	gtk_grid_attach(GTK_GRID(container), label_mag, 2, 2, 2, 1);
+	gtk_grid_attach(GTK_GRID(container), label_mag, 2, 2, 1, 1);
+	label_mag_max = gtk_label_new("Magnitude(max): 0.000000");
+	gtk_widget_set_margin_start_my(label_mag_max, 20);
+	gtk_widget_set_margin_top(label_mag_max, 15);
+	gtk_grid_attach(GTK_GRID(container), label_mag_max, 3, 2, 2, 1);
 	
 	char s[100];
 	sprintf(s, "Image statistics: Average %.2lf, STDEV %.2lf", avg, stdev);
@@ -707,6 +937,27 @@ void activate(GtkApplication* app, gpointer user_data) {
 	g_signal_connect(combo_ap, "changed", G_CALLBACK(combosel_ap), NULL);
 	gtk_grid_attach(GTK_GRID(container), combo_ap, 1, 5, 1, 1);
 
+	label_color = gtk_label_new("Color mode");
+	gtk_widget_set_margin_top(label_color, 0);
+	gtk_widget_set_margin_bottom(label_color, 20);
+	gtk_widget_set_margin_start_my(label_color, 40);
+	gtk_grid_attach(GTK_GRID(container), label_color, 2, 5, 1, 1);
+	liststore = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_STRING);
+
+	gtk_list_store_insert_with_values(liststore, NULL, -1, 0, "Grayscale", -1);
+	gtk_list_store_insert_with_values(liststore, NULL, -1, 0, "Rainbow", -1);
+
+	combo_color = gtk_combo_box_new_with_model(GTK_TREE_MODEL(liststore));
+	gtk_widget_set_margin_top(combo_color, 0);
+	gtk_widget_set_margin_bottom(combo_color, 20);
+	gtk_widget_set_margin_start_my(combo_color, 20);
+	column = gtk_cell_renderer_text_new();
+	gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(combo_color), column, TRUE);
+	gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(combo_color), column, "text", NULL);
+	gtk_combo_box_set_active(GTK_COMBO_BOX(combo_color), 0);
+	g_signal_connect(combo_color, "changed", G_CALLBACK(combosel_color), NULL);
+	gtk_grid_attach(GTK_GRID(container), combo_color, 3, 5, 1, 1);
+
 	gtk_widget_show_all(window_options);
 
 
@@ -728,6 +979,19 @@ void activate(GtkApplication* app, gpointer user_data) {
 	gtk_container_add(GTK_CONTAINER(window_header), eventbox_header);
 	gtk_widget_show_all(window_header);
 
+
+
+	window_profile = gtk_application_window_new(app);
+	gtk_window_set_title(GTK_WINDOW(window_profile), "Star profiles");
+	gtk_window_set_default_size(GTK_WINDOW(window_profile), 512, 150);
+
+	draw_profiles = gtk_image_new();
+	eventbox = gtk_event_box_new();
+	gtk_container_add(GTK_CONTAINER(eventbox), draw_profiles);
+	gtk_widget_set_size_request(eventbox, 512, 150);
+	//g_signal_connect(G_OBJECT(draw_profiles), "draw", G_CALLBACK(draw_profiles_func), NULL);
+	gtk_container_add(GTK_CONTAINER(window_profile), eventbox);
+	gtk_widget_show_all(window_profile);
 }
 
 int main(int argc, char *argv[]) {

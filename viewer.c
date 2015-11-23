@@ -137,7 +137,7 @@ gboolean mousemove_callback(GtkWidget *eventbox, GdkEventButton *event, gpointer
 		y -= (wy - imgy * mag) / 2;
 	}
 	if (x < 0 || y < 0 || x > imgx * mag || y > imgy * mag) return 0;
-	if (x >= apsize*mag && y >= apsize*mag && x <= imgx - apsize*mag && y <= imgy - apsize*mag) {
+	if (x >= apsize*mag && y >= apsize*mag && x <= imgx*mag - apsize*mag && y <= imgy*mag - apsize*mag) {
 		int pixval = 0;
 		for (int i = -apsize; i <= apsize; i++) {
 			for (int j = -((int)sqrt(apsize * apsize - i * i)); j*j + i*i <= apsize*apsize; j++) {
@@ -472,6 +472,19 @@ void combosel() {
 		case 7:
 		mag = 1.0;
 		break;
+		case 8:
+		mag = 1.5;
+		break;
+		case 9:
+		mag = 2.0;
+		break;
+		case 10:
+		mag = 3.0;
+		break;
+		case 11:
+		mag = 4.0;
+		break;
+		
 	}
 	if (gtk_combo_box_get_active(GTK_COMBO_BOX(combo_color)) == 0) {
 		makeimg();
@@ -816,6 +829,11 @@ void activate(GtkApplication* app, gpointer user_data) {
 	gtk_list_store_insert_with_values(liststore, NULL, -1, 0, "75%", -1);
 	gtk_list_store_insert_with_values(liststore, NULL, -1, 0, "87.5%", -1);
 	gtk_list_store_insert_with_values(liststore, NULL, -1, 0, "100%", -1);
+	gtk_list_store_insert_with_values(liststore, NULL, -1, 0, "150%", -1);
+	gtk_list_store_insert_with_values(liststore, NULL, -1, 0, "200%", -1);
+	gtk_list_store_insert_with_values(liststore, NULL, -1, 0, "300%", -1);
+	gtk_list_store_insert_with_values(liststore, NULL, -1, 0, "400%", -1);
+
 
 	combo = gtk_combo_box_new_with_model(GTK_TREE_MODEL(liststore));
 	gtk_widget_set_margin_top(combo, 20);

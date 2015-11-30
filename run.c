@@ -352,6 +352,7 @@ int main(int argc, char *argv[]) {
 		}
 		global = (size_t)count;
 		err = clEnqueueNDRangeKernel(commands, kernel, 1, NULL, &global, &local, 0, NULL, NULL);
+		local = (size_t)1;
 		if (err) {
 			fprintf(stderr, "Error: Failed to execute OpenCL kernel.\n");
 			return EXIT_FAILURE;

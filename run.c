@@ -24,6 +24,7 @@ fitsfile *tmp;
 
 const char *OpenCL_kernel = "\n\
 __kernel void average(__global float* input, __global float* output, int xsize, int ysize, int imgsize, int count) { \n\
+	if (ysize <= get_global_id(0)) return;\n\
 	int num = get_global_id(0)*xsize; \n\
 	for(int i = 0; i < xsize; i++) { \n\
 		for(int j = 0; j < count; j++) { \n\
@@ -33,6 +34,7 @@ __kernel void average(__global float* input, __global float* output, int xsize, 
 	} \n\
 } \n\
 __kernel void average_dark(__global float* input, __global float* output, __global float* input_bias, int xsize, int ysize, int imgsize, int count) { \n\
+	if (ysize <= get_global_id(0)) return;\n\
 	int num = get_global_id(0)*xsize; \n\
 	for(int i = 0; i < xsize; i++) { \n\
 		for(int j = 0; j < count; j++) { \n\
@@ -84,6 +86,7 @@ inline float qselect(float *arr, int n, int k) { \n\
 	} \n\
 } \n\
 __kernel void median_flat(__global float* input, __global float* output, __global float* input_dark, __global float* exptime_flat, __global float* input_bias, float exptime_dark, int xsize, int ysize, int imgsize, int count, int mid) { \n\
+	if (ysize <= get_global_id(0)) return;\n\
 	int num = get_global_id(0)*xsize; \n\
 	float inp[100]; //filecnt_max \n\
 	for(int i = 0; i < xsize; i++) { \n\
@@ -94,6 +97,7 @@ __kernel void median_flat(__global float* input, __global float* output, __globa
 	} \n\
 }\n\
 __kernel void photo(__global float* input, __global float* output, __global float* input_bias, __global float* input_dark, __global float* input_flat, __global float* exptime_photo, float exptime_dark, int xsize, int ysize, int imgsize, int count, float flat_avg) { \n\
+	if (ysize <= get_global_id(0)) return;\n\
 	int num = get_global_id(0)*xsize; \n\
 	for(int i = 0; i < xsize; i++) { \n\
 		for(int j = 0; j < count; j++) { \n\
@@ -350,11 +354,11 @@ int main(int argc, char *argv[]) {
 			fprintf(stderr, "Error: Failed to retrieve OpenCL kernel work group info. %d\n", err);
 			return EXIT_FAILURE;
 		}
-		global = (size_t)count;
+		global = (size_t)8192;
 		err = clEnqueueNDRangeKernel(commands, kernel, 1, NULL, &global, &local, 0, NULL, NULL);
 		local = (size_t)1;
 		if (err) {
-			fprintf(stderr, "Error: Failed to execute OpenCL kernel.\n");
+			fprintf(stderr, "Error: Failed to execute OpenCL kernel: %d\n", err);
 			return EXIT_FAILURE;
 		}
 		clFinish(commands);
@@ -421,7 +425,7 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "Error: Failed to retrieve OpenCL kernel work group info. %d\n", err);
 		return EXIT_FAILURE;
 	}
-	global = (size_t)count;
+	global = (size_t)8192;
 	err = clEnqueueNDRangeKernel(commands, kernel, 1, NULL, &global, &local, 0, NULL, NULL);
 	if (err) {
 		fprintf(stderr, "Error: Failed to execute OpenCL kernel.\n");
@@ -503,7 +507,7 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "Error: Failed to retrieve OpenCL kernel work group info. %d\n", err);
 		return EXIT_FAILURE;
 	}
-	global = (size_t)count;
+	global = (size_t)8192;
 	err = clEnqueueNDRangeKernel(commands, kernel, 1, NULL, &global, &local, 0, NULL, NULL);
 	if (err) {
 		fprintf(stderr, "Error: Failed to execute OpenCL kernel.\n");
@@ -596,7 +600,7 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "Error: Failed to retrieve OpenCL kernel work group info. %d\n", err);
 		return EXIT_FAILURE;
 	}
-	global = (size_t)count;
+	global = (size_t)8192;
 	err = clEnqueueNDRangeKernel(commands, kernel, 1, NULL, &global, &local, 0, NULL, NULL);
 	if (err) {
 		fprintf(stderr, "Error: Failed to execute OpenCL kernel.\n");
@@ -633,7 +637,7 @@ int main(int argc, char *argv[]) {
 		strcpy(newname, "processed-");
 		strcat(newname, nphoto[i]);
 		unlink(newname);
-		fits_create_file(&tmp, newname, &status);
+		fits_create_diskfile(&tmp, newname, &status);
 
 		fits_get_img_param(photo[i], 9, &bitpix, &naxis, naxes, &status);
 		fits_create_img(tmp, bitpix, naxis, naxes, &status);

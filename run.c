@@ -134,8 +134,9 @@ __kernel void photo(__global float* input, __global float* output, __global floa
 int main(int argc, char *argv[]) {
 	#ifdef _WIN32
 	#else
-	struct timeval t0;
+	struct timeval t0, t1;
 	gettimeofday(&t0, 0);
+	gettimeofday(&t1, 0);
 	int sec, usec;
 	#endif
 	FILE *config;
@@ -507,6 +508,13 @@ int main(int argc, char *argv[]) {
 	fprintf(stderr, "Saved the master bias as masterbias.fits\n");
 
 
+	#ifdef _WIN32
+	#else
+	sec = t0.tv_sec, usec = t0.tv_usec;
+	gettimeofday(&t0, 0);
+	fprintf(stderr, "Took %.3lf seconds.\n", ((double)(t0.tv_sec - sec)*1000000 + (t0.tv_usec - usec))/1000000);
+	#endif
+
 
 
 	fprintf(stderr, "Creating master dark...\n");
@@ -665,6 +673,13 @@ int main(int argc, char *argv[]) {
 	fprintf(stderr, "Saved the master dark(100sec) as masterdark_100sec.fits\n");
 
 
+	#ifdef _WIN32
+	#else
+	sec = t0.tv_sec, usec = t0.tv_usec;
+	gettimeofday(&t0, 0);
+	fprintf(stderr, "Took %.3lf seconds.\n", ((double)(t0.tv_sec - sec)*1000000 + (t0.tv_usec - usec))/1000000);
+	#endif
+
 
 	fprintf(stderr, "Creating master flat...\n");
 	pixels_single = (float*)malloc(cnt_flat*realx*realy*sizeof(float));
@@ -768,6 +783,13 @@ int main(int argc, char *argv[]) {
 	fits_close_file(tmp_flat, &status);
 	fprintf(stderr, "Saved the master flat as masterflat.fits\n");
 
+	#ifdef _WIN32
+	#else
+	sec = t0.tv_sec, usec = t0.tv_usec;
+	gettimeofday(&t0, 0);
+	fprintf(stderr, "Took %.3lf seconds.\n", ((double)(t0.tv_sec - sec)*1000000 + (t0.tv_usec - usec))/1000000);
+	#endif
+
 
 	pixels_single = (float*)malloc(frag*realx*realy*sizeof(float));
 	if (pixels_single == NULL) {
@@ -858,18 +880,36 @@ int main(int argc, char *argv[]) {
 			exit(1);
 		}
 
-		free(pixels_single);
+		
 		clReleaseMemObject(input);
 		clReleaseMemObject(output);
 		clReleaseMemObject(input_bias);
 		clReleaseMemObject(input_dark);
 		clReleaseMemObject(input_flat);
 		clReleaseMemObject(input_exptime_photo);
-		clReleaseProgram(program);
 		clReleaseKernel(kernel);
+
+		for(int j = 0; j < cnt_tmp; j++) {
+			char *newname = malloc(strlen(nphoto[i*frag+j])+10);
+			strcpy(newname, "processed-");
+			strcat(newname, nphoto[i*frag+j]);
+			unlink(newname);
+			fits_create_file(&tmp[i*frag+j], newname, &status);
+			fits_copy_header(photo[i*frag+j], tmp[i*frag+j], &status);
+
+			fits_write_img(tmp[i*frag+j], TFLOAT, 1, imgsize_mem, photo_comb+imgsize_mem*j, &status);
+			fits_close_file(tmp[i*frag+j], &status);
+			fprintf(stderr, "Saved the output as %s\n", newname);
+			free(newname);
+		}
 	}
 
-	fprintf(stderr, "Saving outputs...\n");
+	#ifdef _WIN32
+	#else
+	sec = t0.tv_sec, usec = t0.tv_usec;
+	gettimeofday(&t0, 0);
+	fprintf(stderr, "Took %.3lf seconds.\n", ((double)(t0.tv_sec - sec)*1000000 + (t0.tv_usec - usec))/1000000);
+	#endif
 
 	/*int bitpix;
 	int naxis;
@@ -878,20 +918,6 @@ int main(int argc, char *argv[]) {
 	char buf[1000];
 	int hdupos;*/
 
-	for(int i = 0; i < cnt_photo; i++) {
-		char *newname = malloc(strlen(nphoto[i])+10);
-		strcpy(newname, "processed-");
-		strcat(newname, nphoto[i]);
-		unlink(newname);
-		fits_create_file(&tmp[i], newname, &status);
-		fits_copy_header(photo[i], tmp[i], &status);
-
-		fits_write_img(tmp[i], TFLOAT, 1, imgsize_mem, photo_comb+imgsize_mem*i, &status);
-		fits_close_file(tmp[i], &status);
-		//I don't know why but it throws segmentation fault if I close the file.
-		fprintf(stderr, "Saved the output as %s\n", newname);
-		free(newname);
-	}
 
 	for(int i = 0; i < cnt_bias; i++) {
 		fits_close_file(bias[i], &status);
@@ -910,12 +936,14 @@ int main(int argc, char *argv[]) {
 	free(dark_comb);
 	free(flat_comb);
 	free(photo_comb);
+	free(pixels_single);
+	clReleaseProgram(program);
 
 	fprintf(stderr, "Processing completed\n");
 	#ifdef _WIN32
 	#else
-	sec = t0.tv_sec, usec = t0.tv_usec;
+	sec = t1.tv_sec, usec = t1.tv_usec;
 	gettimeofday(&t0, 0);
-	fprintf(stderr, "Took %.3lf seconds.\n", ((double)(t0.tv_sec - sec)*1000000 + (t0.tv_usec - usec))/1000000);
+	fprintf(stderr, "Total elapsed time: %.3lf seconds.\n", ((double)(t0.tv_sec - sec)*1000000 + (t0.tv_usec - usec))/1000000);
 	#endif
 }

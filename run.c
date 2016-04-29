@@ -14,6 +14,7 @@
 #endif
 
 #define filecnt_max 100
+#define frag 5
 
 char nbias[filecnt_max][256], ndark[filecnt_max][256], nflat[filecnt_max][256], nphoto[filecnt_max][256];
 fitsfile *bias[filecnt_max];
@@ -31,6 +32,30 @@ __kernel void average(__global float* input, __global float* output, int xsize, 
 			output[num+i] += input[j*imgsize+num+i]; \n\
 		} \n\
 		output[num+i] /= count; \n\
+	} \n\
+} \n\
+__kernel void sum(__global float* input, __global float* output, int xsize, int ysize, int imgsize, int count) { \n\
+	if (ysize <= get_global_id(0)) return;\n\
+	int num = get_global_id(0)*xsize; \n\
+	for(int i = 0; i < xsize; i++) { \n\
+		for(int j = 0; j < count; j++) { \n\
+			output[num+i] += input[j*imgsize+num+i]; \n\
+		} \n\
+	} \n\
+} \n\
+__kernel void div(__global float* io, int xsize, int ysize, int imgsize, int count) { \n\
+	if (ysize <= get_global_id(0)) return;\n\
+	int num = get_global_id(0)*xsize; \n\
+	for(int i = 0; i < xsize; i++) { \n\
+		io[num+i] /= count; \n\
+	} \n\
+} \n\
+__kernel void sub_and_div(__global float* a, __global float* b, int xsize, int ysize, int imgsize, int count, float exptime) { \n\
+	if (ysize <= get_global_id(0)) return;\n\
+	int num = get_global_id(0)*xsize; \n\
+	for(int i = 0; i < xsize; i++) { \n\
+		a[num+i] -= b[num+i]*count; \n\
+		a[num+i] /= exptime; \n\
 	} \n\
 } \n\
 __kernel void average_dark(__global float* input, __global float* output, __global float* input_bias, int xsize, int ysize, int imgsize, int count) { \n\
@@ -85,23 +110,23 @@ inline float qselect(float *arr, int n, int k) { \n\
 		} \n\
 	} \n\
 } \n\
-__kernel void median_flat(__global float* input, __global float* output, __global float* input_dark, __global float* exptime_flat, __global float* input_bias, float exptime_dark, int xsize, int ysize, int imgsize, int count, int mid) { \n\
+__kernel void median_flat(__global float* input, __global float* output, __global float* input_dark, __global float* exptime_flat, __global float* input_bias, int xsize, int ysize, int imgsize, int count, int mid) { \n\
 	if (ysize <= get_global_id(0)) return;\n\
 	int num = get_global_id(0)*xsize; \n\
 	float inp[100]; //filecnt_max \n\
 	for(int i = 0; i < xsize; i++) { \n\
 		for(int j = 0; j < count; j++) { \n\
-			inp[j] = input[j*imgsize+num+i] - input_dark[num+i] / exptime_dark * exptime_flat[j]; \n\
+			inp[j] = input[j*imgsize+num+i] - input_dark[num+i] * exptime_flat[j]; \n\
 		} \n\
 		output[num+i] = qselect(inp, count, mid) - input_bias[num+i]; \n\
 	} \n\
 }\n\
-__kernel void photo(__global float* input, __global float* output, __global float* input_bias, __global float* input_dark, __global float* input_flat, __global float* exptime_photo, float exptime_dark, int xsize, int ysize, int imgsize, int count, float flat_avg) { \n\
+__kernel void photo(__global float* input, __global float* output, __global float* input_bias, __global float* input_dark, __global float* input_flat, __global float* exptime_photo, int xsize, int ysize, int imgsize, int count, float flat_avg) { \n\
 	if (ysize <= get_global_id(0)) return;\n\
 	int num = get_global_id(0)*xsize; \n\
 	for(int i = 0; i < xsize; i++) { \n\
 		for(int j = 0; j < count; j++) { \n\
-			output[j*imgsize+num+i] = ((input[j*imgsize+num+i] - input_bias[num+i]) - (input_dark[num+i] / exptime_dark * exptime_photo[j])) * flat_avg / input_flat[num+i]; \n\
+			output[j*imgsize+num+i] = ((input[j*imgsize+num+i] - input_bias[num+i]) - (input_dark[num+i] * exptime_photo[j])) * flat_avg / input_flat[num+i]; \n\
 		} \n\
 	} \n\
 }";
@@ -130,8 +155,10 @@ int main(int argc, char *argv[]) {
 	cl_mem output;
 
 	fprintf(stderr, "GPUPhotometry by HLETRD\n");
+	fprintf(stderr, "Using CFITSIO %g...\n", CFITSIO_VERSION);
 	fprintf(stderr, "\n");
 	fprintf(stderr, "Initializing...\n");
+
 
 	fprintf(stderr, "Reading config...\n");
 	if (argc != 2 || access(argv[1], F_OK) != -1) {
@@ -217,7 +244,7 @@ int main(int argc, char *argv[]) {
 	fclose(config);
 
 	int status;
-	fprintf(stderr, "Reading files...\n");
+	fprintf(stderr, "Reading informafiles...\n");
 	for (int i=0; i<cnt_bias; i++) {
 		fits_open_diskfile(&bias[i], nbias[i], READONLY, &status);
 		if (status) {
@@ -244,10 +271,10 @@ int main(int argc, char *argv[]) {
 		fits_get_img_size(dark[i], 2, imgsize, &status);
 		fits_read_key(dark[i], TFLOAT, "EXPTIME", exptime_dark+i, NULL, &status);
 		fprintf(stderr, "Reading dark: %s (%.3f sec exposure)\n", ndark[i], exptime_dark[i]);
-		if (i>0 && exptime_dark[i] != exptime_dark[i-1]) {
+		/*if (i>0 && exptime_dark[i] != exptime_dark[i-1]) {
 			fprintf(stderr, "Error: exposure time of dark frames are not equal.\n");
 			return 1;
-		}
+		}*/
 		if (realx == 0 && realy == 0) {
 			realx = imgsize[0];
 			realy = imgsize[1];
@@ -296,14 +323,12 @@ int main(int argc, char *argv[]) {
 	float *bias_comb = (float*)calloc(realx*realy, sizeof(float));
 	float *dark_comb = (float*)calloc(realx*realy, sizeof(float));
 	float *flat_comb = (float*)calloc(realx*realy, sizeof(float));
-	float *photo_comb = (float*)calloc(realx*realy*cnt_photo, sizeof(float));
+	float *photo_comb = (float*)calloc(realx*realy*frag, sizeof(float));
 	long imgsize_mem = realx * realy;
 
-
-
-	float *pixels_single = (float*)malloc(cnt_bias*realx*realy*sizeof(float));
+	float *pixels_single = (float*)malloc(frag*realx*realy*sizeof(float));
 	if (pixels_single == NULL) {
-		fprintf(stderr, "Error: failed to allocate %ldbytes of memory.", cnt_bias*realx*realy*sizeof(float));
+		fprintf(stderr, "Error: failed to allocate %ldbytes of memory.", frag*realx*realy*sizeof(float));
 		return 1;
 	}
 	long pixeli[2];
@@ -312,110 +337,104 @@ int main(int argc, char *argv[]) {
 	pixeli[0] = 1;
 	pixeli[1] = 1;
 	int mempos = 0;
-	fprintf(stderr, "Loading bias files...\n");
-	for(int j=0; j<cnt_bias; j++) {
-		fits_read_pix(bias[j], TFLOAT, pixeli, realx*realy, NULL, pixels_single+mempos, NULL, &status);
-		mempos += imgsize_mem;
+	fprintf(stderr, "Creating master bias...\n");
+	int cnt_tmp = frag;
+
+	for(int i=0; i<=cnt_bias/frag; i++) {
+		if (i == cnt_bias / frag) {
+			cnt_tmp = cnt_bias % frag;
+			if (!cnt_tmp) break;
+		}
+
+		mempos = 0;
+		for(int j=0; j<cnt_tmp; j++) {
+			fprintf(stderr, "Loading bias...(%d/%d)\n", i * frag + j+1, cnt_bias);
+			fits_read_pix(bias[i * frag + j], TFLOAT, pixeli, realx*realy, NULL, pixels_single+mempos, NULL, &status);
+			mempos += imgsize_mem;
+		}
+
+		if (cnt_bias > 0) {
+			fprintf(stderr, "Combining bias...(%d/%d)\n", i * frag + cnt_tmp, cnt_bias);
+			count = realy;
+			kernel = clCreateKernel(program, "sum", &err);
+			if (!kernel || err != CL_SUCCESS) {
+				fprintf(stderr, "Error: Failed to create OpenCL kernel.\n");
+				return EXIT_FAILURE;
+			}
+			input = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float)*frag*realx*realy, NULL, NULL);
+			output = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float)*realx*realy, NULL, NULL);
+			if (!input || !output) {
+				fprintf(stderr, "Error: Failed to allocate OpenCL device memory.\n");
+				return EXIT_FAILURE;
+			}    
+			err = clEnqueueWriteBuffer(commands, input, CL_TRUE, 0, sizeof(float)*frag*realx*realy, pixels_single, 0, NULL, NULL);
+			err = clEnqueueWriteBuffer(commands, output, CL_TRUE, 0, sizeof(float)*realx*realy, bias_comb, 0, NULL, NULL);
+			if (err != CL_SUCCESS) {
+				fprintf(stderr, "Error: Failed to write to OpenCL source array.\n");
+				return EXIT_FAILURE;
+			}
+			imgsize_mem_int = (int)imgsize_mem;
+			err = 0;
+			err = clSetKernelArg(kernel, 0, sizeof(cl_mem), &input);
+			err |= clSetKernelArg(kernel, 1, sizeof(cl_mem), &output);
+			err |= clSetKernelArg(kernel, 2, sizeof(int), &realx);
+			err |= clSetKernelArg(kernel, 3, sizeof(int), &realy);
+			err |= clSetKernelArg(kernel, 4, sizeof(int), &imgsize_mem_int);
+			err |= clSetKernelArg(kernel, 5, sizeof(int), &cnt_tmp);
+			if (err != CL_SUCCESS) {
+				fprintf(stderr, "Error: Failed to set OpenCL kernel arguments. %d\n", err);
+				return EXIT_FAILURE;
+			}
+			err = clGetKernelWorkGroupInfo(kernel, device_id, CL_KERNEL_WORK_GROUP_SIZE, sizeof(local), &local, NULL);
+			if (err != CL_SUCCESS) {
+				fprintf(stderr, "Error: Failed to retrieve OpenCL kernel work group info. %d\n", err);
+				return EXIT_FAILURE;
+			}
+			global = (size_t)8192;
+			err = clEnqueueNDRangeKernel(commands, kernel, 1, NULL, &global, &local, 0, NULL, NULL);
+			local = (size_t)1;
+			if (err) {
+				fprintf(stderr, "Error: Failed to execute OpenCL kernel: %d\n", err);
+				return EXIT_FAILURE;
+			}
+			clFinish(commands);
+			err = clEnqueueReadBuffer(commands, output, CL_TRUE, 0, sizeof(float)*realx*realy, bias_comb, 0, NULL, NULL);  
+			if (err != CL_SUCCESS) {
+				fprintf(stderr, "Error: Failed to read OpenCL output. %d\n", err);
+				exit(1);
+			}
+
+			clReleaseMemObject(input);
+			clReleaseMemObject(output);
+			clReleaseKernel(kernel);
+		}
 	}
-
-	if (cnt_bias > 0) {
-		fprintf(stderr, "Combining bias...\n");
-		count = realy;
-		kernel = clCreateKernel(program, "average", &err);
-		if (!kernel || err != CL_SUCCESS) {
-			fprintf(stderr, "Error: Failed to create OpenCL kernel.\n");
-			return EXIT_FAILURE;
-		}
-		input = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float)*cnt_bias*realx*realy, NULL, NULL);
-		output = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(float)*realx*realy, NULL, NULL);
-		if (!input || !output) {
-			fprintf(stderr, "Error: Failed to allocate OpenCL device memory.\n");
-			return EXIT_FAILURE;
-		}    
-		err = clEnqueueWriteBuffer(commands, input, CL_TRUE, 0, sizeof(float)*cnt_bias*realx*realy, pixels_single, 0, NULL, NULL);
-		if (err != CL_SUCCESS) {
-			fprintf(stderr, "Error: Failed to write to OpenCL source array.\n");
-			return EXIT_FAILURE;
-		}
-		imgsize_mem_int = (int)imgsize_mem;
-		err = 0;
-		err = clSetKernelArg(kernel, 0, sizeof(cl_mem), &input);
-		err |= clSetKernelArg(kernel, 1, sizeof(cl_mem), &output);
-		err |= clSetKernelArg(kernel, 2, sizeof(int), &realx);
-		err |= clSetKernelArg(kernel, 3, sizeof(int), &realy);
-		err |= clSetKernelArg(kernel, 4, sizeof(int), &imgsize_mem_int);
-		err |= clSetKernelArg(kernel, 5, sizeof(int), &cnt_bias);
-		if (err != CL_SUCCESS) {
-			fprintf(stderr, "Error: Failed to set OpenCL kernel arguments. %d\n", err);
-			return EXIT_FAILURE;
-		}
-		err = clGetKernelWorkGroupInfo(kernel, device_id, CL_KERNEL_WORK_GROUP_SIZE, sizeof(local), &local, NULL);
-		if (err != CL_SUCCESS) {
-			fprintf(stderr, "Error: Failed to retrieve OpenCL kernel work group info. %d\n", err);
-			return EXIT_FAILURE;
-		}
-		global = (size_t)8192;
-		err = clEnqueueNDRangeKernel(commands, kernel, 1, NULL, &global, &local, 0, NULL, NULL);
-		local = (size_t)1;
-		if (err) {
-			fprintf(stderr, "Error: Failed to execute OpenCL kernel: %d\n", err);
-			return EXIT_FAILURE;
-		}
-		clFinish(commands);
-		err = clEnqueueReadBuffer(commands, output, CL_TRUE, 0, sizeof(float)*realx*realy, bias_comb, 0, NULL, NULL);  
-		if (err != CL_SUCCESS) {
-			fprintf(stderr, "Error: Failed to read OpenCL output. %d\n", err);
-			exit(1);
-		}
-
-		clReleaseMemObject(input);
-		clReleaseMemObject(output);
-		clReleaseKernel(kernel);
-	}
-
 	free(pixels_single);
-	pixels_single = (float*)malloc(cnt_dark*realx*realy*sizeof(float));
-	if (pixels_single == NULL) {
-		fprintf(stderr, "Error: failed to allocate %ldbytes of memory.", cnt_dark*realx*realy*sizeof(float));
-		return 1;
-	}
-	pixeli[0] = 1;
-	pixeli[1] = 1;
-	mempos = 0;
-	fprintf(stderr, "Loading dark files...\n");
-	for(int j=0; j<cnt_dark; j++) {
-		fits_read_pix(dark[j], TFLOAT, pixeli, realx*realy, NULL, pixels_single+mempos, NULL, &status);
-		mempos += imgsize_mem;
-	}
-	fprintf(stderr, "Combining dark & Subtracting bias...\n");
+
+	fprintf(stderr, "Calculating average bias...\n");
 	count = realy;
-	kernel = clCreateKernel(program, "average_dark", &err);
+	kernel = clCreateKernel(program, "div", &err);
 	if (!kernel || err != CL_SUCCESS) {
 		fprintf(stderr, "Error: Failed to create OpenCL kernel.\n");
 		return EXIT_FAILURE;
 	}
-	input = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float)*cnt_dark*realx*realy, NULL, NULL);
-	input_bias = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float)*realx*realy, NULL, NULL);
-	output = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(float)*realx*realy, NULL, NULL);
-	if (!input || !output) {
+	output = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float)*realx*realy, NULL, NULL);
+	if (!output) {
 		fprintf(stderr, "Error: Failed to allocate OpenCL device memory.\n");
 		return EXIT_FAILURE;
-	}    
-	err = clEnqueueWriteBuffer(commands, input, CL_TRUE, 0, sizeof(float)*cnt_dark*realx*realy, pixels_single, 0, NULL, NULL);
-	err = clEnqueueWriteBuffer(commands, input_bias, CL_TRUE, 0, sizeof(float)*realx*realy, bias_comb, 0, NULL, NULL);
+	}
+	err = clEnqueueWriteBuffer(commands, output, CL_TRUE, 0, sizeof(float)*realx*realy, bias_comb, 0, NULL, NULL);
 	if (err != CL_SUCCESS) {
 		fprintf(stderr, "Error: Failed to write to OpenCL source array.\n");
 		return EXIT_FAILURE;
 	}
 	imgsize_mem_int = (int)imgsize_mem;
 	err = 0;
-	err = clSetKernelArg(kernel, 0, sizeof(cl_mem), &input);
-	err |= clSetKernelArg(kernel, 1, sizeof(cl_mem), &output);
-	err |= clSetKernelArg(kernel, 2, sizeof(cl_mem), &input_bias);
-	err |= clSetKernelArg(kernel, 3, sizeof(int), &realx);
-	err |= clSetKernelArg(kernel, 4, sizeof(int), &realy);
-	err |= clSetKernelArg(kernel, 5, sizeof(int), &imgsize_mem_int);
-	err |= clSetKernelArg(kernel, 6, sizeof(int), &cnt_dark);
+	err |= clSetKernelArg(kernel, 0, sizeof(cl_mem), &output);
+	err |= clSetKernelArg(kernel, 1, sizeof(int), &realx);
+	err |= clSetKernelArg(kernel, 2, sizeof(int), &realy);
+	err |= clSetKernelArg(kernel, 3, sizeof(int), &imgsize_mem_int);
+	err |= clSetKernelArg(kernel, 4, sizeof(int), &cnt_bias);
 	if (err != CL_SUCCESS) {
 		fprintf(stderr, "Error: Failed to set OpenCL kernel arguments. %d\n", err);
 		return EXIT_FAILURE;
@@ -427,12 +446,191 @@ int main(int argc, char *argv[]) {
 	}
 	global = (size_t)8192;
 	err = clEnqueueNDRangeKernel(commands, kernel, 1, NULL, &global, &local, 0, NULL, NULL);
+	local = (size_t)1;
 	if (err) {
-		fprintf(stderr, "Error: Failed to execute OpenCL kernel.\n");
+		fprintf(stderr, "Error: Failed to execute OpenCL kernel: %d\n", err);
 		return EXIT_FAILURE;
 	}
 	clFinish(commands);
-	err = clEnqueueReadBuffer(commands, output, CL_TRUE, 0, sizeof(float)*realx*realy, dark_comb, 0, NULL, NULL);  
+	err = clEnqueueReadBuffer(commands, output, CL_TRUE, 0, sizeof(float)*realx*realy, bias_comb, 0, NULL, NULL);
+	if (err != CL_SUCCESS) {
+		fprintf(stderr, "Error: Failed to read OpenCL output. %d\n", err);
+		exit(1);
+	}
+
+	clReleaseMemObject(output);
+	clReleaseKernel(kernel);
+
+
+	int bitpix;
+	int naxis;
+	long naxes[10];
+	int nkeys;
+	char* buf=(char*)calloc(2000, sizeof(char));
+	int hdupos;
+
+	unlink("masterbias.fits");
+	fits_create_diskfile(&tmp, "masterbias.fits", &status);
+
+	fits_get_img_param(bias[0], 9, &bitpix, &naxis, naxes, &status);
+	fits_create_img(tmp, bitpix, naxis, naxes, &status);
+	fits_get_hdu_num(bias[0], &hdupos);
+	status=0;
+	for(; !status; hdupos++) {
+		fits_get_hdrspace(bias[0], &nkeys, NULL, &status);
+		for(int j=1; j<=nkeys; j++) {
+			fits_read_record(bias[0], j, buf, &status);
+			fits_write_record(tmp, buf, &status);
+		}
+		fits_movrel_hdu(bias[0], 1, NULL, &status);
+	}
+	if (status == END_OF_FILE) status = 0;
+
+	if (status != 0) {    
+		fits_report_error(stderr, status);
+		return(status);
+	}
+
+	fits_write_img(tmp, TFLOAT, 1, (long long)imgsize_mem, bias_comb, &status);
+	fits_close_file(tmp, &status);
+	fprintf(stderr, "Saved the master bias as masterbias.fits\n");
+	free(buf);
+
+
+
+
+	fprintf(stderr, "Creating master dark...\n");
+	pixels_single = (float*)malloc(frag*realx*realy*sizeof(float));
+	if (pixels_single == NULL) {
+		fprintf(stderr, "Error: failed to allocate %ldbytes of memory.", frag*realx*realy*sizeof(float));
+		return 1;
+	}
+	pixeli[0] = 1;
+	pixeli[1] = 1;
+	cnt_tmp = frag;
+	float totalexp_dark = 0;
+
+	for(int i=0; i<=cnt_dark/frag; i++) {
+		if (i == cnt_dark / frag) {
+			cnt_tmp = cnt_dark % frag;
+			if (!cnt_tmp) break;
+		}
+
+		mempos = 0;
+		for(int j=0; j<cnt_tmp; j++) {
+			fprintf(stderr, "Loading dark...(%d/%d)\n", i * frag + j+1, cnt_dark);
+			fits_read_pix(dark[i*frag+j], TFLOAT, pixeli, realx*realy, NULL, pixels_single+mempos, NULL, &status);
+			mempos += imgsize_mem;
+			totalexp_dark += exptime_dark[i*frag+j];
+		}
+		totalexp_dark /= 100.0;
+		fprintf(stderr, "Combining dark...(%d/%d)\n", i*frag+cnt_tmp, cnt_dark);
+		count = realy;
+		kernel = clCreateKernel(program, "sum", &err);
+		if (!kernel || err != CL_SUCCESS) {
+			fprintf(stderr, "Error: Failed to create OpenCL kernel.\n");
+			return EXIT_FAILURE;
+		}
+		input = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float)*frag*realx*realy, NULL, NULL);
+		//input_bias = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float)*realx*realy, NULL, NULL);
+		output = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float)*realx*realy, NULL, NULL);
+		if (!input || !output) {
+			fprintf(stderr, "Error: Failed to allocate OpenCL device memory.\n");
+			return EXIT_FAILURE;
+		}    
+		err = clEnqueueWriteBuffer(commands, input, CL_TRUE, 0, sizeof(float)*frag*realx*realy, pixels_single, 0, NULL, NULL);
+		err = clEnqueueWriteBuffer(commands, output, CL_TRUE, 0, sizeof(float)*realx*realy, dark_comb, 0, NULL, NULL);
+		//err = clEnqueueWriteBuffer(commands, input_bias, CL_TRUE, 0, sizeof(float)*realx*realy, bias_comb, 0, NULL, NULL);
+		if (err != CL_SUCCESS) {
+			fprintf(stderr, "Error: Failed to write to OpenCL source array.\n");
+			return EXIT_FAILURE;
+		}
+		imgsize_mem_int = (int)imgsize_mem;
+		err = 0;
+		err = clSetKernelArg(kernel, 0, sizeof(cl_mem), &input);
+		err |= clSetKernelArg(kernel, 1, sizeof(cl_mem), &output);
+		//err |= clSetKernelArg(kernel, 2, sizeof(cl_mem), &input_bias);
+		err |= clSetKernelArg(kernel, 2, sizeof(int), &realx);
+		err |= clSetKernelArg(kernel, 3, sizeof(int), &realy);
+		err |= clSetKernelArg(kernel, 4, sizeof(int), &imgsize_mem_int);
+		err |= clSetKernelArg(kernel, 5, sizeof(int), &cnt_tmp);
+		if (err != CL_SUCCESS) {
+			fprintf(stderr, "Error: Failed to set OpenCL kernel arguments. %d\n", err);
+			return EXIT_FAILURE;
+		}
+		err = clGetKernelWorkGroupInfo(kernel, device_id, CL_KERNEL_WORK_GROUP_SIZE, sizeof(local), &local, NULL);
+		if (err != CL_SUCCESS) {
+			fprintf(stderr, "Error: Failed to retrieve OpenCL kernel work group info. %d\n", err);
+			return EXIT_FAILURE;
+		}
+		global = (size_t)8192;
+		err = clEnqueueNDRangeKernel(commands, kernel, 1, NULL, &global, &local, 0, NULL, NULL);
+		if (err) {
+			fprintf(stderr, "Error: Failed to execute OpenCL kernel.\n");
+			return EXIT_FAILURE;
+		}
+		clFinish(commands);
+		err = clEnqueueReadBuffer(commands, output, CL_TRUE, 0, sizeof(float)*realx*realy, dark_comb, 0, NULL, NULL);  
+		if (err != CL_SUCCESS) {
+			fprintf(stderr, "Error: Failed to read OpenCL output. %d\n", err);
+			exit(1);
+		}
+
+		clReleaseMemObject(input);
+		clReleaseMemObject(output);
+		//clReleaseMemObject(input_dark);
+		clReleaseKernel(kernel);
+	}
+	free(pixels_single);
+
+
+	fprintf(stderr, "Subtracting bias from dark...\n");
+	count = realy;
+	kernel = clCreateKernel(program, "sub_and_div", &err);
+	if (!kernel || err != CL_SUCCESS) {
+		fprintf(stderr, "Error: Failed to create OpenCL kernel.\n");
+		return EXIT_FAILURE;
+	}
+	output = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float)*realx*realy, NULL, NULL);
+	input = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float)*realx*realy, NULL, NULL);
+	if (!output) {
+		fprintf(stderr, "Error: Failed to allocate OpenCL device memory.\n");
+		return EXIT_FAILURE;
+	}
+	err = clEnqueueWriteBuffer(commands, output, CL_TRUE, 0, sizeof(float)*realx*realy, dark_comb, 0, NULL, NULL);
+	err = clEnqueueWriteBuffer(commands, input, CL_TRUE, 0, sizeof(float)*realx*realy, bias_comb, 0, NULL, NULL);
+
+	if (err != CL_SUCCESS) {
+		fprintf(stderr, "Error: Failed to write to OpenCL source array.\n");
+		return EXIT_FAILURE;
+	}
+	imgsize_mem_int = (int)imgsize_mem;
+	err = 0;
+	err |= clSetKernelArg(kernel, 0, sizeof(cl_mem), &output);
+	err |= clSetKernelArg(kernel, 1, sizeof(cl_mem), &input);
+	err |= clSetKernelArg(kernel, 2, sizeof(int), &realx);
+	err |= clSetKernelArg(kernel, 3, sizeof(int), &realy);
+	err |= clSetKernelArg(kernel, 4, sizeof(int), &imgsize_mem_int);
+	err |= clSetKernelArg(kernel, 5, sizeof(int), &cnt_dark);
+	err |= clSetKernelArg(kernel, 6, sizeof(float), &totalexp_dark);
+	if (err != CL_SUCCESS) {
+		fprintf(stderr, "Error: Failed to set OpenCL kernel arguments. %d\n", err);
+		return EXIT_FAILURE;
+	}
+	err = clGetKernelWorkGroupInfo(kernel, device_id, CL_KERNEL_WORK_GROUP_SIZE, sizeof(local), &local, NULL);
+	if (err != CL_SUCCESS) {
+		fprintf(stderr, "Error: Failed to retrieve OpenCL kernel work group info. %d\n", err);
+		return EXIT_FAILURE;
+	}
+	global = (size_t)8192;
+	err = clEnqueueNDRangeKernel(commands, kernel, 1, NULL, &global, &local, 0, NULL, NULL);
+	local = (size_t)1;
+	if (err) {
+		fprintf(stderr, "Error: Failed to execute OpenCL kernel: %d\n", err);
+		return EXIT_FAILURE;
+	}
+	clFinish(commands);
+	err = clEnqueueReadBuffer(commands, output, CL_TRUE, 0, sizeof(float)*realx*realy, dark_comb, 0, NULL, NULL);
 	if (err != CL_SUCCESS) {
 		fprintf(stderr, "Error: Failed to read OpenCL output. %d\n", err);
 		exit(1);
@@ -440,11 +638,40 @@ int main(int argc, char *argv[]) {
 
 	clReleaseMemObject(input);
 	clReleaseMemObject(output);
-	clReleaseMemObject(input_bias);
 	clReleaseKernel(kernel);
 
+	/*buf=(char*)calloc(2000, sizeof(char));
+	unlink("masterdark_100sec.fits");
+	fits_create_diskfile(&tmp, "masterdark_100sec.fits", &status);
 
-	free(pixels_single);
+	fits_get_img_param(dark[0], 9, &bitpix, &naxis, naxes, &status);
+	fits_create_img(tmp, bitpix, naxis, naxes, &status);
+	fits_get_hdu_num(dark[0], &hdupos);
+	status=0;
+	for(; !status; hdupos++) {
+		fits_get_hdrspace(dark[0], &nkeys, NULL, &status);
+		for(int j=1; j<=nkeys; j++) {
+			fits_read_record(dark[0], j, buf, &status);
+			fits_write_record(tmp, buf, &status);
+		}
+		fits_movrel_hdu(dark[0], 1, NULL, &status);
+	}
+	if (status == END_OF_FILE) status = 0;
+
+	if (status != 0) {    
+		fits_report_error(stderr, status);
+		return(status);
+	}
+
+	fits_write_img(tmp, TFLOAT, 1, (long long)imgsize_mem, dark_comb, &status);
+	fits_close_file(tmp, &status);
+	fprintf(stderr, "Saved the master dark(100sec) as masterdark_100sec.fits\n");
+	free(buf);*/
+
+
+
+
+	fprintf(stderr, "Creating master flat...\n");
 	pixels_single = (float*)malloc(cnt_flat*realx*realy*sizeof(float));
 	if (pixels_single == NULL) {
 		fprintf(stderr, "Error: failed to allocate %ldbytes of memory.", cnt_flat*realx*realy*sizeof(float));
@@ -452,14 +679,17 @@ int main(int argc, char *argv[]) {
 	}
 	pixeli[0] = 1;
 	pixeli[1] = 1;
+
 	mempos = 0;
-	fprintf(stderr, "Loading flat files...\n");
 	for(int j=0; j<cnt_flat; j++) {
+		fprintf(stderr, "Loading flat files...(%d/%d)\n", j+1, cnt_flat);
 		for(pixeli[1]=realy; pixeli[1]>0; pixeli[1]--) {
 			fits_read_pix(flat[j], TFLOAT, pixeli, realx, NULL, pixels_single+realx*pixeli[1]-realx+mempos, NULL, &status);
 		}
 		mempos += imgsize_mem;
+		exptime_flat[j] /= 100;
 	}
+	
 	count = realy;
 	fprintf(stderr, "Combining flat & Subtracting bias, dark...\n");
 	kernel = clCreateKernel(program, "median_flat", &err);
@@ -475,7 +705,7 @@ int main(int argc, char *argv[]) {
 	if (!input || !input_dark || !output) {
 		fprintf(stderr, "Error: Failed to allocate OpenCL device memory.\n");
 		return EXIT_FAILURE;
-	}    
+	}
 	err = clEnqueueWriteBuffer(commands, input, CL_TRUE, 0, sizeof(float)*cnt_flat*realx*realy, pixels_single, 0, NULL, NULL);
 	err |= clEnqueueWriteBuffer(commands, input_dark, CL_TRUE, 0, sizeof(float)*realx*realy, dark_comb, 0, NULL, NULL);
 	err |= clEnqueueWriteBuffer(commands, input_exptime_flat, CL_TRUE, 0, sizeof(float)*cnt_flat, exptime_flat, 0, NULL, NULL);
@@ -492,12 +722,11 @@ int main(int argc, char *argv[]) {
 	err |= clSetKernelArg(kernel, 2, sizeof(cl_mem), &input_dark);
 	err |= clSetKernelArg(kernel, 3, sizeof(cl_mem), &input_exptime_flat);
 	err |= clSetKernelArg(kernel, 4, sizeof(cl_mem), &input_bias);
-	err |= clSetKernelArg(kernel, 5, sizeof(float), &exptime_dark[0]);
-	err |= clSetKernelArg(kernel, 6, sizeof(int), &realx);
-	err |= clSetKernelArg(kernel, 7, sizeof(int), &realy);
-	err |= clSetKernelArg(kernel, 8, sizeof(int), &imgsize_mem_int);
-	err |= clSetKernelArg(kernel, 9, sizeof(int), &cnt_flat);
-	err |= clSetKernelArg(kernel, 10, sizeof(int), &mid);
+	err |= clSetKernelArg(kernel, 5, sizeof(int), &realx);
+	err |= clSetKernelArg(kernel, 6, sizeof(int), &realy);
+	err |= clSetKernelArg(kernel, 7, sizeof(int), &imgsize_mem_int);
+	err |= clSetKernelArg(kernel, 8, sizeof(int), &cnt_flat);
+	err |= clSetKernelArg(kernel, 9, sizeof(int), &mid);
 	if (err != CL_SUCCESS) {
 		fprintf(stderr, "Error: Failed to set OpenCL kernel arguments. %d\n", err);
 		return EXIT_FAILURE;
@@ -534,134 +763,176 @@ int main(int argc, char *argv[]) {
 	clReleaseKernel(kernel);
 
 
-	pixels_single = (float*)malloc(cnt_photo*realx*realy*sizeof(float));
+	/*buf=(char*)calloc(2000, sizeof(char));
+	unlink("masterflat.fits");
+	fits_create_diskfile(&tmp, "masterflat.fits", &status);
+
+	//fits_get_img_param(flat[0], 9, &bitpix, &naxis, naxes, &status);
+	fits_create_img(tmp, bitpix, naxis, naxes, &status);
+	//fits_get_hdu_num(flat[0], &hdupos);
+	status=0;
+	/*for(; !status; hdupos++) {
+		fits_get_hdrspace(flat[0], &nkeys, NULL, &status);
+		for(int j=1; j<=nkeys; j++) {
+			fits_read_record(flat[0], j, buf, &status);
+			fits_write_record(tmp, buf, &status);
+		}
+		fits_movrel_hdu(flat[0], 1, NULL, &status);
+	}
+	if (status == END_OF_FILE) status = 0;
+
+	if (status != 0) {    
+		fits_report_error(stderr, status);
+		return(status);
+	}
+
+	fits_write_img(tmp, TFLOAT, 1, (long long)imgsize_mem, flat_comb, &status);
+	fits_close_file(tmp, &status);
+	fprintf(stderr, "Saved the master flat as masterflat.fits\n");
+	free(buf);*/
+
+
+
+
+	pixels_single = (float*)malloc(frag*realx*realy*sizeof(float));
 	if (pixels_single == NULL) {
-		fprintf(stderr, "Error: failed to allocate %ldbytes of memory.", cnt_photo*realx*realy*sizeof(float));
+		fprintf(stderr, "Error: failed to allocate %ldbytes of memory.", frag*realx*realy*sizeof(float));
 		return 1;
 	}
 	pixeli[0] = 1;
 	pixeli[1] = 1;
 	mempos = 0;
-	fprintf(stderr, "Loading photo files...\n");
-	for(int j=0; j<cnt_photo; j++) {
-		for(pixeli[1]=realy; pixeli[1]>0; pixeli[1]--) {
-			fits_read_pix(photo[j], TFLOAT, pixeli, realx, NULL, pixels_single+realx*pixeli[1]-realx+mempos, NULL, &status);
+
+	for(int i=0; i<cnt_photo; i++) {
+		exptime_photo[i] /= 100;
+	}
+
+	cnt_tmp=frag;
+	for(int i=0; i<=cnt_photo/frag; i++) {
+		if (i == cnt_photo / frag) {
+			cnt_tmp = cnt_photo % frag;
+			if (!cnt_tmp) break;
 		}
-		mempos += imgsize_mem;
-	}
-	fprintf(stderr, "Combining photo...\n");
-	count = realy;
-	kernel = clCreateKernel(program, "photo", &err);
-	if (!kernel || err != CL_SUCCESS) {
-		fprintf(stderr, "Error: Failed to create OpenCL kernel.\n");
-		return EXIT_FAILURE;
-	}
-	input = clCreateBuffer(context, CL_MEM_READ_ONLY,  sizeof(float)*cnt_photo*realx*realy, NULL, NULL);
-	input_bias = clCreateBuffer(context, CL_MEM_READ_ONLY,  sizeof(float)*realx*realy, NULL, NULL);
-	input_dark = clCreateBuffer(context, CL_MEM_READ_ONLY,  sizeof(float)*realx*realy, NULL, NULL);
-	input_flat = clCreateBuffer(context, CL_MEM_READ_ONLY,  sizeof(float)*realx*realy, NULL, NULL);
-	input_exptime_photo = clCreateBuffer(context, CL_MEM_READ_ONLY,  sizeof(float)*cnt_photo, NULL, NULL);
-	
-	output = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(float)*cnt_photo*realx*realy, NULL, NULL);
-	if (!input || !output) {
-		fprintf(stderr, "Error: Failed to allocate OpenCL device memory.\n");
-		return EXIT_FAILURE;
-	}    
-	err = clEnqueueWriteBuffer(commands, input, CL_TRUE, 0, sizeof(float)*cnt_photo*realx*realy, pixels_single, 0, NULL, NULL);
-	err |= clEnqueueWriteBuffer(commands, input_bias, CL_TRUE, 0, sizeof(float)*realx*realy, bias_comb, 0, NULL, NULL);
-	err |= clEnqueueWriteBuffer(commands, input_dark, CL_TRUE, 0, sizeof(float)*realx*realy, dark_comb, 0, NULL, NULL);
-	err |= clEnqueueWriteBuffer(commands, input_flat, CL_TRUE, 0, sizeof(float)*realx*realy, flat_comb, 0, NULL, NULL);
-	err |= clEnqueueWriteBuffer(commands, input_exptime_photo, CL_TRUE, 0, sizeof(float)*cnt_photo, exptime_photo, 0, NULL, NULL);
-	if (err != CL_SUCCESS) {
-		fprintf(stderr, "Error: Failed to write to OpenCL source array.\n");
-		return EXIT_FAILURE;
-	}
-	imgsize_mem_int = (int)imgsize_mem;
-	mid = cnt_photo / 2;
-	err = 0;
-	err  = clSetKernelArg(kernel, 0, sizeof(cl_mem), &input);
-	err |= clSetKernelArg(kernel, 1, sizeof(cl_mem), &output);
-	err |= clSetKernelArg(kernel, 2, sizeof(cl_mem), &input_bias);
-	err |= clSetKernelArg(kernel, 3, sizeof(cl_mem), &input_dark);
-	err |= clSetKernelArg(kernel, 4, sizeof(cl_mem), &input_flat);
-	err |= clSetKernelArg(kernel, 5, sizeof(cl_mem), &input_exptime_photo);
-	err |= clSetKernelArg(kernel, 6, sizeof(float), &exptime_dark);
-	err |= clSetKernelArg(kernel, 7, sizeof(int), &realx);
-	err |= clSetKernelArg(kernel, 8, sizeof(int), &realy);
-	err |= clSetKernelArg(kernel, 9, sizeof(int), &imgsize_mem_int);
-	err |= clSetKernelArg(kernel, 10, sizeof(int), &cnt_photo);
-	err |= clSetKernelArg(kernel, 11, sizeof(float), &flat_avg);
-	if (err != CL_SUCCESS) {
-		fprintf(stderr, "Error: Failed to set OpenCL kernel arguments. %d\n", err);
-		return EXIT_FAILURE;
-	}
-	err = clGetKernelWorkGroupInfo(kernel, device_id, CL_KERNEL_WORK_GROUP_SIZE, sizeof(local), &local, NULL);
-	if (err != CL_SUCCESS) {
-		fprintf(stderr, "Error: Failed to retrieve OpenCL kernel work group info. %d\n", err);
-		return EXIT_FAILURE;
-	}
-	global = (size_t)8192;
-	err = clEnqueueNDRangeKernel(commands, kernel, 1, NULL, &global, &local, 0, NULL, NULL);
-	if (err) {
-		fprintf(stderr, "Error: Failed to execute OpenCL kernel.\n");
-		return EXIT_FAILURE;
-	}
-	clFinish(commands);
-	err = clEnqueueReadBuffer(commands, output, CL_TRUE, 0, sizeof(float)*realx*realy*cnt_photo, photo_comb, 0, NULL, NULL);  
-	if (err != CL_SUCCESS) {
-		fprintf(stderr, "Error: Failed to read OpenCL output. %d\n", err);
-		exit(1);
-	}
 
-	free(pixels_single);
-	clReleaseMemObject(input);
-	clReleaseMemObject(output);
-	clReleaseMemObject(input_bias);
-	clReleaseMemObject(input_dark);
-	clReleaseMemObject(input_flat);
-	clReleaseMemObject(input_exptime_photo);
-	clReleaseProgram(program);
-	clReleaseKernel(kernel);
+		mempos = 0;
+		for(int j=0; j<cnt_tmp; j++) {
+			fprintf(stderr, "Loading light...(%d/%d)\n", i * frag + j+1, cnt_photo);
+			fits_read_pix(photo[i*frag+j], TFLOAT, pixeli, realx*realy, NULL, pixels_single+mempos, NULL, &status);
+			mempos += imgsize_mem;
+		}
+		fprintf(stderr, "Calibrating light...(%d/%d)\n", i*frag+cnt_tmp, cnt_photo);
+		count = realy;
+		kernel = clCreateKernel(program, "photo", &err);
+		if (!kernel || err != CL_SUCCESS) {
+			fprintf(stderr, "Error: Failed to create OpenCL kernel.\n");
+			return EXIT_FAILURE;
+		}
+		input = clCreateBuffer(context, CL_MEM_READ_ONLY,  sizeof(float)*cnt_tmp*realx*realy, NULL, NULL);
+		input_bias = clCreateBuffer(context, CL_MEM_READ_ONLY,  sizeof(float)*realx*realy, NULL, NULL);
+		input_dark = clCreateBuffer(context, CL_MEM_READ_ONLY,  sizeof(float)*realx*realy, NULL, NULL);
+		input_flat = clCreateBuffer(context, CL_MEM_READ_ONLY,  sizeof(float)*realx*realy, NULL, NULL);
+		input_exptime_photo = clCreateBuffer(context, CL_MEM_READ_ONLY,  sizeof(float)*cnt_tmp, NULL, NULL);
+		
+		output = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(float)*cnt_tmp*realx*realy, NULL, NULL);
+		if (!input || !output) {
+			fprintf(stderr, "Error: Failed to allocate OpenCL device memory.\n");
+			return EXIT_FAILURE;
+		}    
+		err = clEnqueueWriteBuffer(commands, input, CL_TRUE, 0, sizeof(float)*cnt_tmp*realx*realy, pixels_single, 0, NULL, NULL);
+		err |= clEnqueueWriteBuffer(commands, input_bias, CL_TRUE, 0, sizeof(float)*realx*realy, bias_comb, 0, NULL, NULL);
+		err |= clEnqueueWriteBuffer(commands, input_dark, CL_TRUE, 0, sizeof(float)*realx*realy, dark_comb, 0, NULL, NULL);
+		err |= clEnqueueWriteBuffer(commands, input_flat, CL_TRUE, 0, sizeof(float)*realx*realy, flat_comb, 0, NULL, NULL);
+		err |= clEnqueueWriteBuffer(commands, input_exptime_photo, CL_TRUE, 0, sizeof(float)*cnt_tmp, exptime_photo+i*frag, 0, NULL, NULL);
+		if (err != CL_SUCCESS) {
+			fprintf(stderr, "Error: Failed to write to OpenCL source array.\n");
+			return EXIT_FAILURE;
+		}
+		imgsize_mem_int = (int)imgsize_mem;
+		mid = cnt_photo / 2;
+		err = 0;
+		err  = clSetKernelArg(kernel, 0, sizeof(cl_mem), &input);
+		err |= clSetKernelArg(kernel, 1, sizeof(cl_mem), &output);
+		err |= clSetKernelArg(kernel, 2, sizeof(cl_mem), &input_bias);
+		err |= clSetKernelArg(kernel, 3, sizeof(cl_mem), &input_dark);
+		err |= clSetKernelArg(kernel, 4, sizeof(cl_mem), &input_flat);
+		err |= clSetKernelArg(kernel, 5, sizeof(cl_mem), &input_exptime_photo);
+		err |= clSetKernelArg(kernel, 6, sizeof(int), &realx);
+		err |= clSetKernelArg(kernel, 7, sizeof(int), &realy);
+		err |= clSetKernelArg(kernel, 8, sizeof(int), &imgsize_mem_int);
+		err |= clSetKernelArg(kernel, 9, sizeof(int), &cnt_photo);
+		err |= clSetKernelArg(kernel, 10, sizeof(float), &flat_avg);
+		if (err != CL_SUCCESS) {
+			fprintf(stderr, "Error: Failed to set OpenCL kernel arguments. %d\n", err);
+			return EXIT_FAILURE;
+		}
+		err = clGetKernelWorkGroupInfo(kernel, device_id, CL_KERNEL_WORK_GROUP_SIZE, sizeof(local), &local, NULL);
+		if (err != CL_SUCCESS) {
+			fprintf(stderr, "Error: Failed to retrieve OpenCL kernel work group info. %d\n", err);
+			return EXIT_FAILURE;
+		}
+		global = (size_t)8192;
+		err = clEnqueueNDRangeKernel(commands, kernel, 1, NULL, &global, &local, 0, NULL, NULL);
+		if (err) {
+			fprintf(stderr, "Error: Failed to execute OpenCL kernel.\n");
+			return EXIT_FAILURE;
+		}
+		clFinish(commands);
+		err = clEnqueueReadBuffer(commands, output, CL_TRUE, 0, sizeof(float)*realx*realy*cnt_tmp, photo_comb, 0, NULL, NULL);  
+		if (err != CL_SUCCESS) {
+			fprintf(stderr, "Error: Failed to read OpenCL output. %d\n", err);
+			exit(1);
+		}
 
-	fprintf(stderr, "Saving outputs...\n");
+		free(pixels_single);
+		clReleaseMemObject(input);
+		clReleaseMemObject(output);
+		clReleaseMemObject(input_bias);
+		clReleaseMemObject(input_dark);
+		clReleaseMemObject(input_flat);
+		clReleaseMemObject(input_exptime_photo);
+		clReleaseProgram(program);
+		clReleaseKernel(kernel);
 
-	int bitpix;
-	int naxis;
-	long naxes[10];
-	int nkeys;
-	char buf[1000];
-	int hdupos;
+		fprintf(stderr, "Saving outputs...\n");
 
-	for(int i = 0; i < cnt_photo; i++) {
-		char *newname = malloc(strlen(nphoto[i])+10);
-		strcpy(newname, "processed-");
-		strcat(newname, nphoto[i]);
-		unlink(newname);
-		fits_create_diskfile(&tmp, newname, &status);
+		buf=(char*)calloc(2000000, sizeof(char));
+		for (int j = 0; j < cnt_tmp; j++) {
+			char *newname = malloc(strlen(nphoto[i*frag+j])+10);
+			strcpy(newname, "processed-");
+			strcat(newname, nphoto[i*frag+j]);
+			unlink(newname);
+			fprintf(stderr, "chkpoint 1\n");
+			fits_create_diskfile(&tmp, newname, &status);
 
-		fits_get_img_param(photo[i], 9, &bitpix, &naxis, naxes, &status);
-		fits_create_img(tmp, bitpix, naxis, naxes, &status);
-		fits_get_hdu_num(photo[i], &hdupos);
-		status=0;
-		for(; !status; hdupos++) {
-			fits_get_hdrspace(photo[i], &nkeys, NULL, &status);
-			for(int j=1; j<=nkeys; j++) {
-				fits_read_record(photo[i], j, buf, &status);
-				fits_write_record(tmp, buf, &status);
+			fits_get_img_param(photo[i*frag+j], 9, &bitpix, &naxis, naxes, &status);
+			fits_create_img(tmp, bitpix, naxis, naxes, &status);
+			fits_get_hdu_num(photo[i*frag+j], &hdupos);
+			fprintf(stderr, "chkpoint 2\n");
+			status=0;
+			for(; !status; hdupos++) {
+				fits_get_hdrspace(photo[i*frag+j], &nkeys, NULL, &status);
+				fprintf(stderr, "chkpoint 3\n");
+				for(int j=1; j<nkeys; j++) {
+					fits_read_record(photo[i*frag+j], j, buf, &status);
+					fprintf(stderr, "chkpoint 4\n");
+					//fits_write_record(tmp, buf, &status);
+				}
+				//fits_movrel_hdu(photo[i*frag+j], 1, NULL, &status);
+				status = 0;
+				fprintf(stderr, "chkpoint 5\n");
 			}
-			fits_movrel_hdu(photo[i], 1, NULL, &status);
-		}
-		if (status == END_OF_FILE) status = 0;
+			if (status == END_OF_FILE) status = 0;
 
-		if (status != 0) {    
-			fits_report_error(stderr, status);
-			return(status);
-		}
+			if (status != 0) {    
+				fits_report_error(stderr, status);
+				return(status);
+			}
 
-		fits_write_img(tmp, TFLOAT, 1, (long long)imgsize_mem, photo_comb+imgsize_mem*i, &status);
-		fits_close_file(tmp, &status);
-		fprintf(stderr, "Saved the output as %s\n", newname);
-		free(newname);
+			fits_write_img(tmp, TFLOAT, 1, (long long)imgsize_mem, photo_comb+imgsize_mem*j, &status);
+			fits_close_file(tmp, &status);
+			fprintf(stderr, "Saved the output as %s\n", newname);
+			free(newname);
+		}
 	}
 
 	for(int i = 0; i < cnt_bias; i++) {

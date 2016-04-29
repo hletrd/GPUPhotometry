@@ -21,7 +21,7 @@ fitsfile *bias[filecnt_max];
 fitsfile *dark[filecnt_max];
 fitsfile *flat[filecnt_max];
 fitsfile *photo[filecnt_max];
-fitsfile *tmp;
+fitsfile *tmp[filecnt_max];
 
 const char *OpenCL_kernel = "\n\
 __kernel void average(__global float* input, __global float* output, int xsize, int ysize, int imgsize, int count) { \n\
@@ -305,17 +305,17 @@ int main(int argc, char *argv[]) {
 	for (int i=0; i<cnt_photo; i++) {
 		fits_open_diskfile(&photo[i], nphoto[i], READONLY, &status);
 		if (status) {
-			fprintf(stderr, "Error reading dark file %s\n", nphoto[i]);
+			fprintf(stderr, "Error reading light file %s\n", nphoto[i]);
 			return status;
 		}
 		fits_get_img_size(photo[i], 2, imgsize, &status);
 		fits_read_key(photo[i], TFLOAT, "EXPTIME", exptime_photo+i, NULL, &status);
-		fprintf(stderr, "Reading photo: %s (%.3f sec exposure)\n", nphoto[i], exptime_photo[i]);
+		fprintf(stderr, "Reading light: %s (%.3f sec exposure)\n", nphoto[i], exptime_photo[i]);
 		if (realx == 0 && realy == 0) {
 			realx = imgsize[0];
 			realy = imgsize[1];
 		} else if (realx != imgsize[0] || realy != imgsize[1]) {
-			fprintf(stderr, "Error: size of the photo file %s is different with others.\n", nphoto[i]);
+			fprintf(stderr, "Error: size of the light file %s is different with others.\n", nphoto[i]);
 			return 1;
 		}
 	}
@@ -462,7 +462,7 @@ int main(int argc, char *argv[]) {
 	clReleaseKernel(kernel);
 
 
-	int bitpix;
+	/*int bitpix;
 	int naxis;
 	long naxes[10];
 	int nkeys;
@@ -494,7 +494,17 @@ int main(int argc, char *argv[]) {
 	fits_write_img(tmp, TFLOAT, 1, (long long)imgsize_mem, bias_comb, &status);
 	fits_close_file(tmp, &status);
 	fprintf(stderr, "Saved the master bias as masterbias.fits\n");
-	free(buf);
+	free(buf);*/
+
+	fitsfile *tmp_bias;
+	unlink("masterbias.fits");
+	fits_create_diskfile(&tmp_bias, "masterbias.fits", &status);
+
+	fits_copy_header(bias[0], tmp_bias, &status);
+
+	fits_write_img(tmp_bias, TFLOAT, 1, (long long)imgsize_mem, bias_comb, &status);
+	fits_close_file(tmp_bias, &status);
+	fprintf(stderr, "Saved the master bias as masterbias.fits\n");
 
 
 
@@ -640,34 +650,19 @@ int main(int argc, char *argv[]) {
 	clReleaseMemObject(output);
 	clReleaseKernel(kernel);
 
-	/*buf=(char*)calloc(2000, sizeof(char));
+
+
+	fitsfile *tmp_dark;
 	unlink("masterdark_100sec.fits");
-	fits_create_diskfile(&tmp, "masterdark_100sec.fits", &status);
+	fits_create_diskfile(&tmp_dark, "masterdark_100sec.fits", &status);
 
-	fits_get_img_param(dark[0], 9, &bitpix, &naxis, naxes, &status);
-	fits_create_img(tmp, bitpix, naxis, naxes, &status);
-	fits_get_hdu_num(dark[0], &hdupos);
-	status=0;
-	for(; !status; hdupos++) {
-		fits_get_hdrspace(dark[0], &nkeys, NULL, &status);
-		for(int j=1; j<=nkeys; j++) {
-			fits_read_record(dark[0], j, buf, &status);
-			fits_write_record(tmp, buf, &status);
-		}
-		fits_movrel_hdu(dark[0], 1, NULL, &status);
-	}
-	if (status == END_OF_FILE) status = 0;
+	double exptime_tmp = 100.0;
+	fits_copy_header(dark[0], tmp_dark, &status);
+	fits_update_key(tmp_dark, TFLOAT, "EXPTIME", &exptime_tmp, NULL, &status);
 
-	if (status != 0) {    
-		fits_report_error(stderr, status);
-		return(status);
-	}
-
-	fits_write_img(tmp, TFLOAT, 1, (long long)imgsize_mem, dark_comb, &status);
-	fits_close_file(tmp, &status);
+	fits_write_img(tmp_dark, TFLOAT, 1, (long long)imgsize_mem, dark_comb, &status);
+	fits_close_file(tmp_dark, &status);
 	fprintf(stderr, "Saved the master dark(100sec) as masterdark_100sec.fits\n");
-	free(buf);*/
-
 
 
 
@@ -763,35 +758,15 @@ int main(int argc, char *argv[]) {
 	clReleaseKernel(kernel);
 
 
-	/*buf=(char*)calloc(2000, sizeof(char));
+	fitsfile *tmp_flat;
 	unlink("masterflat.fits");
-	fits_create_diskfile(&tmp, "masterflat.fits", &status);
+	fits_create_diskfile(&tmp_flat, "masterflat.fits", &status);
 
-	//fits_get_img_param(flat[0], 9, &bitpix, &naxis, naxes, &status);
-	fits_create_img(tmp, bitpix, naxis, naxes, &status);
-	//fits_get_hdu_num(flat[0], &hdupos);
-	status=0;
-	/*for(; !status; hdupos++) {
-		fits_get_hdrspace(flat[0], &nkeys, NULL, &status);
-		for(int j=1; j<=nkeys; j++) {
-			fits_read_record(flat[0], j, buf, &status);
-			fits_write_record(tmp, buf, &status);
-		}
-		fits_movrel_hdu(flat[0], 1, NULL, &status);
-	}
-	if (status == END_OF_FILE) status = 0;
+	fits_copy_header(flat[0], tmp_flat, &status);
 
-	if (status != 0) {    
-		fits_report_error(stderr, status);
-		return(status);
-	}
-
-	fits_write_img(tmp, TFLOAT, 1, (long long)imgsize_mem, flat_comb, &status);
-	fits_close_file(tmp, &status);
+	fits_write_img(tmp_flat, TFLOAT, 1, (long long)imgsize_mem, flat_comb, &status);
+	fits_close_file(tmp_flat, &status);
 	fprintf(stderr, "Saved the master flat as masterflat.fits\n");
-	free(buf);*/
-
-
 
 
 	pixels_single = (float*)malloc(frag*realx*realy*sizeof(float));
@@ -892,47 +867,30 @@ int main(int argc, char *argv[]) {
 		clReleaseMemObject(input_exptime_photo);
 		clReleaseProgram(program);
 		clReleaseKernel(kernel);
+	}
 
-		fprintf(stderr, "Saving outputs...\n");
+	fprintf(stderr, "Saving outputs...\n");
 
-		buf=(char*)calloc(2000000, sizeof(char));
-		for (int j = 0; j < cnt_tmp; j++) {
-			char *newname = malloc(strlen(nphoto[i*frag+j])+10);
-			strcpy(newname, "processed-");
-			strcat(newname, nphoto[i*frag+j]);
-			unlink(newname);
-			fprintf(stderr, "chkpoint 1\n");
-			fits_create_diskfile(&tmp, newname, &status);
+	/*int bitpix;
+	int naxis;
+	long naxes[10];
+	int nkeys;
+	char buf[1000];
+	int hdupos;*/
 
-			fits_get_img_param(photo[i*frag+j], 9, &bitpix, &naxis, naxes, &status);
-			fits_create_img(tmp, bitpix, naxis, naxes, &status);
-			fits_get_hdu_num(photo[i*frag+j], &hdupos);
-			fprintf(stderr, "chkpoint 2\n");
-			status=0;
-			for(; !status; hdupos++) {
-				fits_get_hdrspace(photo[i*frag+j], &nkeys, NULL, &status);
-				fprintf(stderr, "chkpoint 3\n");
-				for(int j=1; j<nkeys; j++) {
-					fits_read_record(photo[i*frag+j], j, buf, &status);
-					fprintf(stderr, "chkpoint 4\n");
-					//fits_write_record(tmp, buf, &status);
-				}
-				//fits_movrel_hdu(photo[i*frag+j], 1, NULL, &status);
-				status = 0;
-				fprintf(stderr, "chkpoint 5\n");
-			}
-			if (status == END_OF_FILE) status = 0;
+	for(int i = 0; i < cnt_photo; i++) {
+		char *newname = malloc(strlen(nphoto[i])+10);
+		strcpy(newname, "processed-");
+		strcat(newname, nphoto[i]);
+		unlink(newname);
+		fits_create_file(&tmp[i], newname, &status);
+		fits_copy_header(photo[i], tmp[i], &status);
 
-			if (status != 0) {    
-				fits_report_error(stderr, status);
-				return(status);
-			}
-
-			fits_write_img(tmp, TFLOAT, 1, (long long)imgsize_mem, photo_comb+imgsize_mem*j, &status);
-			fits_close_file(tmp, &status);
-			fprintf(stderr, "Saved the output as %s\n", newname);
-			free(newname);
-		}
+		fits_write_img(tmp[i], TFLOAT, 1, imgsize_mem, photo_comb+imgsize_mem*i, &status);
+		fits_close_file(tmp[i], &status);
+		//I don't know why but it throws segmentation fault if I close the file.
+		fprintf(stderr, "Saved the output as %s\n", newname);
+		free(newname);
 	}
 
 	for(int i = 0; i < cnt_bias; i++) {
